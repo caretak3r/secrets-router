@@ -715,3 +715,162 @@ subjects:
 - [Distroless Images](https://github.com/GoogleContainerTools/distroless)
 - [External Secrets Operator](https://external-secrets.io/)
 
+---
+
+## Implementation Roadmap: Short-Term vs Long-Term
+
+This section outlines the phased approach for implementing the Secrets Broker Service, balancing immediate needs with long-term enhancements.
+
+### Component Implementation Timeline
+
+| Component/Feature | Short-Term (MVP - Weeks 1-3) | Long-Term (Full Implementation - Weeks 4+) | Rationale |
+|-------------------|------------------------------|--------------------------------------------|-----------|
+| **Core API Endpoints** | | | |
+| Single secret fetch (`GET /v1/secrets/{name}`) | ✅ Implement | ✅ Maintain | Core functionality required for MVP |
+| Specific key fetch (`GET /v1/secrets/{name}/{key}`) | ✅ Implement | ✅ Maintain | Essential for structured secrets |
+| Batch secret fetch (`POST /v1/secrets/batch`) | ❌ Defer | ✅ Implement | Optimization for multiple secrets; can use multiple single requests initially |
+| Health/readiness endpoints | ✅ Implement | ✅ Enhance with detailed checks | Required for K8s probes |
+| Metrics endpoint (`/metrics`) | ⚠️ Basic metrics | ✅ Full Prometheus integration | Basic metrics for MVP, comprehensive metrics later |
+| | | | |
+| **Backend Providers** | | | |
+| Kubernetes Secrets backend | ✅ Implement | ✅ Optimize with connection pooling | Primary backend, required for MVP |
+| AWS Secrets Manager backend | ✅ Implement | ✅ Add retry logic, rate limiting | Secondary backend, required for MVP |
+| Backend priority logic (K8s → AWS) | ✅ Implement | ✅ Configurable priority order | Core requirement |
+| Additional backends (Azure Key Vault, HashiCorp Vault, etc.) | ❌ Defer | ✅ Implement as plugins | Not required for initial deployment |
+| Backend health checks | ⚠️ Basic | ✅ Comprehensive health monitoring | Basic checks for MVP, detailed monitoring later |
+| | | | |
+| **Caching** | | | |
+| In-memory caching | ❌ Defer | ✅ Implement TTL-based cache | Can start without cache; add for performance optimization |
+| Cache invalidation | ❌ Defer | ✅ Implement (TTL + manual invalidation) | Required when caching is implemented |
+| Cache size limits | ❌ Defer | ✅ Implement LRU eviction | Required when caching is implemented |
+| Distributed caching (Redis) | ❌ Defer | ✅ Consider for multi-replica deployments | Not needed for single-replica MVP |
+| Cache metrics | ❌ Defer | ✅ Implement hit/miss ratios | Required when caching is implemented |
+| | | | |
+| **Authentication & Security** | | | |
+| mTLS support | ✅ Implement | ✅ Enhance with certificate rotation | Core security requirement |
+| ServiceAccount token passthrough | ✅ Implement | ✅ Add token refresh/rotation logic | Core requirement for RBAC enforcement |
+| Basic RBAC enforcement | ✅ Implement | ✅ Fine-grained authorization policies | Core requirement |
+| Certificate management | ⚠️ Manual | ✅ Automated rotation via cert-manager | Manual for MVP, automation for production |
+| Network policies | ⚠️ Basic | ✅ Comprehensive policies | Basic policies for MVP, detailed policies later |
+| Pod security standards | ✅ Implement | ✅ Enhance with PSA policies | Required for security compliance |
+| | | | |
+| **Observability** | | | |
+| Basic audit logging | ✅ Implement | ✅ Enhance with structured logging | Core requirement for compliance |
+| Request metadata extraction | ✅ Implement (basic) | ✅ Comprehensive metadata | Basic caller identity for MVP |
+| Debug logging (env var controlled) | ✅ Implement | ✅ Enhance with log levels | Required for troubleshooting |
+| Application logs (stdout/stderr) | ✅ Implement | ✅ Structured JSON logging | Basic logging for MVP |
+| Prometheus metrics | ⚠️ Basic counters | ✅ Comprehensive metrics (histograms, gauges) | Basic metrics for MVP |
+| Distributed tracing | ❌ Defer | ✅ Implement (OpenTelemetry) | Not required for MVP |
+| Log aggregation | ⚠️ Basic | ✅ Integration with logging stack | Basic for MVP, full integration later |
+| | | | |
+| **Error Handling & Resilience** | | | |
+| Basic error handling | ✅ Implement | ✅ Comprehensive error types | Required for MVP |
+| Retry logic | ⚠️ Basic retries | ✅ Exponential backoff, circuit breakers | Basic retries for MVP |
+| Circuit breakers | ❌ Defer | ✅ Implement for backend failures | Not critical for MVP |
+| Rate limiting | ❌ Defer | ✅ Implement per-client limits | Not required for initial deployment |
+| Timeout handling | ✅ Implement | ✅ Configurable per-backend | Required for MVP |
+| Graceful shutdown | ⚠️ Basic | ✅ Comprehensive cleanup | Basic for MVP, full cleanup later |
+| | | | |
+| **Deployment & Operations** | | | |
+| Single replica deployment | ✅ Implement | ✅ Multi-replica with HA | Start with single replica |
+| Basic resource limits | ✅ Implement | ✅ Optimized based on metrics | Required for resource management |
+| Distroless container image | ⚠️ Standard Python image | ✅ Distroless optimization | Standard image for MVP, distroless for production |
+| Helm chart | ⚠️ Basic | ✅ Comprehensive with values | Basic chart for MVP |
+| CI/CD pipeline | ⚠️ Basic | ✅ Full pipeline with tests | Basic pipeline for MVP |
+| Documentation | ⚠️ Basic README | ✅ Comprehensive docs + runbooks | Basic docs for MVP |
+| | | | |
+| **Testing** | | | |
+| Unit tests | ⚠️ Basic coverage | ✅ Comprehensive coverage (>80%) | Basic tests for MVP |
+| Integration tests | ⚠️ Basic | ✅ Full integration test suite | Basic tests for MVP |
+| Load testing | ❌ Defer | ✅ Comprehensive load testing | Not required for MVP |
+| Security testing | ⚠️ Basic | ✅ Penetration testing | Basic security checks for MVP |
+| Chaos engineering | ❌ Defer | ✅ Implement chaos tests | Not required for MVP |
+| | | | |
+| **Advanced Features** | | | |
+| Secret versioning support | ❌ Defer | ✅ Implement version selection | Not required for MVP |
+| Secret rotation webhooks | ❌ Defer | ✅ Implement webhook notifications | Not required for MVP |
+| Secret metadata API | ❌ Defer | ✅ Implement metadata endpoints | Not required for MVP |
+| Secret validation | ❌ Defer | ✅ Implement schema validation | Not required for MVP |
+| Secret encryption at rest (additional layer) | ❌ Defer | ✅ Consider for sensitive deployments | Backends handle encryption |
+| Multi-region support | ❌ Defer | ✅ Implement for AWS multi-region | Not required for MVP |
+| Namespace-scoped deployments | ❌ Defer | ✅ Support namespace-scoped instances | Cluster-wide for MVP |
+
+### Short-Term MVP Scope (Weeks 1-3)
+
+**Must Have:**
+- Core API endpoints (single secret fetch, key fetch)
+- Kubernetes Secrets backend
+- AWS Secrets Manager backend
+- Backend priority logic
+- mTLS support
+- ServiceAccount token passthrough
+- Basic audit logging
+- Health/readiness endpoints
+- Basic error handling
+- Single replica deployment
+
+**Should Have:**
+- Basic metrics endpoint
+- Debug logging via environment variable
+- Basic resource limits
+- Basic unit tests
+- Basic documentation
+
+**Nice to Have:**
+- Basic retry logic
+- Basic integration tests
+
+### Long-Term Enhancements (Weeks 4+)
+
+**Performance Optimizations:**
+- TTL-based caching with invalidation
+- Connection pooling for backends
+- Distributed caching for multi-replica deployments
+- Comprehensive metrics and monitoring
+
+**Reliability Enhancements:**
+- Circuit breakers
+- Rate limiting
+- Comprehensive retry logic with exponential backoff
+- Multi-replica high availability deployment
+
+**Security Hardening:**
+- Automated certificate rotation
+- Comprehensive network policies
+- Pod security admission policies
+- Security penetration testing
+
+**Operational Excellence:**
+- Distroless container optimization
+- Comprehensive Helm charts
+- Full CI/CD pipeline
+- Comprehensive documentation and runbooks
+- Chaos engineering tests
+
+**Feature Extensions:**
+- Batch secret fetching
+- Additional backend providers
+- Secret versioning
+- Secret rotation webhooks
+- Multi-region support
+
+### Decision Criteria for Short-Term vs Long-Term
+
+1. **Core Functionality First**: Features required for basic secret fetching are prioritized for MVP
+2. **Security Essentials**: mTLS and RBAC enforcement are non-negotiable for MVP
+3. **Performance Can Wait**: Caching and optimizations can be added after validating core functionality
+4. **Operational Simplicity**: Start with single replica, basic monitoring; scale complexity as needed
+5. **Incremental Value**: Each long-term feature should provide measurable value over the MVP
+
+### Risk Mitigation
+
+**Short-Term Risks:**
+- **No caching**: May cause higher load on backends → Mitigate with rate limiting and monitoring
+- **Single replica**: Single point of failure → Mitigate with quick failover procedures
+- **Basic error handling**: May not cover all edge cases → Mitigate with comprehensive logging
+
+**Long-Term Considerations:**
+- **Caching complexity**: Cache invalidation and consistency → Plan for distributed cache if needed
+- **Multi-replica coordination**: Cache synchronization → Consider Redis or similar
+- **Certificate rotation**: Operational overhead → Automate via cert-manager or similar
+
