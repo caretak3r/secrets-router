@@ -5,9 +5,11 @@
 
 ## Context
 
-In air-gapped Kubernetes deployments, applications require secure access to secrets stored across multiple backends:
+In air-gapped Kubernetes deployments, applications require secure **read-only** access to secrets stored across multiple backends:
 - Kubernetes Secrets (native K8s resources)
 - AWS Secrets Manager (external cloud service)
+
+**Note**: Applications will only fetch/read secrets through this service. Secret creation and updates are managed separately by cluster administrators or CI/CD pipelines.
 
 Current challenges:
 1. **Direct Secret Access Limitations**: Some applications cannot directly read Kubernetes Secrets due to RBAC constraints, security policies, or architectural patterns
@@ -43,7 +45,6 @@ graph TB
     subgraph "Secrets Broker Service"
         SB[Secrets Broker<br/>Python Service]
         AUTH[K8s Auth Passthrough<br/>ServiceAccount Token]
-        CACHE[In-Memory Cache<br/>TTL-based]
     end
     
     subgraph "Kubernetes API"
@@ -65,8 +66,6 @@ graph TB
     K8S_API -->|Read Secrets| K8S_SECRETS
     
     SB -->|IAM Credentials<br/>via IRSA| AWS_SM
-    
-    SB -->|Cache Hit| CACHE
     
     style SB fill:#4a90e2
     style AUTH fill:#7b68ee
@@ -90,24 +89,16 @@ sequenceDiagram
     
     App->>SB: GET /secrets/{name} (mTLS)
     SB->>SB: Extract ServiceAccount from mTLS cert
-    SB->>SB: Check cache (TTL)
-    
-    alt Cache Hit
-        SB->>App: Return cached secret
-    else Cache Miss
-        SB->>Auth: Get ServiceAccount token
-        Auth->>K8S: Authenticate with SA token
-        K8S->>K8S: RBAC Check
-        alt Secret in K8s
-            K8S->>SB: Return K8s Secret
-            SB->>SB: Cache secret
-            SB->>App: Return secret
-        else Secret not in K8s
-            SB->>AWS: Fetch from Secrets Manager (IRSA)
-            AWS->>SB: Return secret
-            SB->>SB: Cache secret
-            SB->>App: Return secret
-        end
+    SB->>Auth: Get ServiceAccount token
+    Auth->>K8S: Authenticate with SA token
+    K8S->>K8S: RBAC Check
+    alt Secret in K8s
+        K8S->>SB: Return K8s Secret
+        SB->>App: Return secret
+    else Secret not in K8s
+        SB->>AWS: Fetch from Secrets Manager (IRSA)
+        AWS->>SB: Return secret
+        SB->>App: Return secret
     end
 ```
 
@@ -117,18 +108,18 @@ sequenceDiagram
 - ✅ Supports both K8s Secrets and AWS Secrets Manager
 - ✅ Lightweight Python service
 - ✅ mTLS support for secure communication
-- ✅ Caching reduces API calls
+- ✅ Read-only access model simplifies security and operations
 
 #### Cons
 - ❌ Requires ServiceAccount token management
 - ❌ Additional network hop for secret access
-- ❌ Cache invalidation complexity
 - ❌ ServiceAccount token rotation handling needed
+- ❌ No caching in MVP (deferred to long-term)
 
 #### Implementation Notes
 - Service extracts ServiceAccount identity from mTLS client certificate
-- Uses Kubernetes client-go library with ServiceAccount token
-- Implements TTL-based caching with configurable expiration
+- Uses Kubernetes client library with ServiceAccount token
+- Read-only operations: GET requests only, no write/update/delete endpoints
 - Audit logs include: caller identity, secret name, backend source, timestamp
 
 ---
@@ -149,7 +140,6 @@ graph TB
         SB[Secrets Broker<br/>Python Service]
         K8S_CLIENT[K8s Client<br/>Cluster Admin RBAC]
         AWS_CLIENT[AWS Client<br/>IRSA]
-        CACHE[In-Memory Cache<br/>TTL-based]
     end
     
     subgraph "Kubernetes API"
@@ -172,8 +162,6 @@ graph TB
     
     SB -->|IAM Credentials<br/>via IRSA| AWS_CLIENT
     AWS_CLIENT -->|Direct Access| AWS_SM
-    
-    SB -->|Cache Hit| CACHE
     
     style SB fill:#4a90e2
     style K8S_CLIENT fill:#7b68ee
@@ -199,22 +187,15 @@ sequenceDiagram
     App->>SB: GET /secrets/{name} (mTLS)
     SB->>SB: Extract caller identity from mTLS cert
     SB->>Auth: Authorize request (namespace, secret name)
-    SB->>SB: Check cache (TTL)
     
-    alt Cache Hit
-        SB->>App: Return cached secret
-    else Cache Miss
-        alt Secret in K8s
-            SB->>K8S: Fetch secret (ClusterRole)
-            K8S->>SB: Return secret
-            SB->>SB: Cache secret
-            SB->>App: Return secret
-        else Secret not in K8s
-            SB->>AWS: Fetch from Secrets Manager (IRSA)
-            AWS->>SB: Return secret
-            SB->>SB: Cache secret
-            SB->>App: Return secret
-        end
+    alt Secret in K8s
+        SB->>K8S: Fetch secret (ClusterRole)
+        K8S->>SB: Return secret
+        SB->>App: Return secret
+    else Secret not in K8s
+        SB->>AWS: Fetch from Secrets Manager (IRSA)
+        AWS->>SB: Return secret
+        SB->>App: Return secret
     end
     
     SB->>SB: Audit log (caller, secret, backend, timestamp)
@@ -226,17 +207,19 @@ sequenceDiagram
 - ✅ Supports both backends seamlessly
 - ✅ Lightweight Python service
 - ✅ Full control over authorization policies
+- ✅ Read-only access model simplifies security
 
 #### Cons
 - ❌ Requires ClusterRole permissions (security concern)
 - ❌ Authorization logic must be maintained separately from K8s RBAC
 - ❌ Potential for privilege escalation if misconfigured
-- ❌ Cache invalidation complexity
+- ❌ No caching in MVP (deferred to long-term)
 
 #### Implementation Notes
-- Service runs with ClusterRole allowing secret read access
+- Service runs with ClusterRole allowing secret read access only
 - Custom authorization engine validates caller identity against secret access policies
 - Policies can be defined via ConfigMap or CRD
+- Read-only operations: GET requests only, no write/update/delete endpoints
 - Audit logs include: caller identity, secret name, backend source, authorization decision, timestamp
 
 ---
@@ -487,24 +470,25 @@ This matrix evaluates each option against the core requirements and design crite
 | Requirement | Description | Option 1 | Option 2 | Option 3 | Option 4 |
 |-------------|-------------|----------|----------|----------|----------|
 | **REQ-001: Just-in-Time API** | Applications must fetch secrets dynamically via API requests at runtime, without pre-mounting or pre-loading secrets. Secrets may be created at any time (before, during, or after application deployment) and must be immediately available. | ✅ **Full Support**<br/>REST API with on-demand fetching | ✅ **Full Support**<br/>REST API with on-demand fetching | ✅ **Full Support**<br/>Dapr Secrets API with on-demand fetching | ❌ **Not Supported**<br/>CRD-based sync model; secrets must be synced before use |
-| **REQ-002: No Secret Mounting** | Applications must not mount secrets as volumes or files. All secret access must be programmatic via API calls to maintain flexibility and reduce coupling. | ✅ **Full Support**<br/>No mounting required; API-only access | ✅ **Full Support**<br/>No mounting required; API-only access | ✅ **Full Support**<br/>No mounting required; SDK/API access | ❌ **Not Supported**<br/>Requires applications to read K8s Secrets (may require mounting) |
-| **REQ-003: Kubernetes RBAC Enforcement** | Must maintain Kubernetes RBAC policies. Applications should only access secrets they are authorized to access based on their ServiceAccount and RBAC rules. | ✅ **Full Support**<br/>ServiceAccount passthrough maintains native RBAC | ⚠️ **Partial Support**<br/>Custom authorization logic required; not using native RBAC | ✅ **Full Support**<br/>Can leverage K8s RBAC through Dapr components | ✅ **Full Support**<br/>Applications use native K8s RBAC to read synced secrets |
-| **REQ-004: mTLS Support** | All communication between applications and the secrets broker must use mutual TLS (mTLS) for authentication and encryption. Both client and server must authenticate each other. | ✅ **Full Support**<br/>Built-in mTLS implementation | ✅ **Full Support**<br/>Built-in mTLS implementation | ✅ **Full Support**<br/>Dapr Sentry provides mTLS automatically | ❌ **Not Supported**<br/>No API interface; direct K8s API access |
-| **REQ-005: Multi-Backend Support** | Must support fetching secrets from multiple backends: Kubernetes Secrets (primary) and AWS Secrets Manager (secondary). Should check K8s Secrets first, then fallback to configured backends. | ✅ **Full Support**<br/>Native support for both backends with priority logic | ✅ **Full Support**<br/>Native support for both backends with priority logic | ✅ **Full Support**<br/>Dapr components for both backends | ⚠️ **Partial Support**<br/>Syncs AWS → K8s; doesn't provide unified API |
-| **REQ-006: Backend Priority Logic** | Must check Kubernetes Secrets first before querying other backends. This ensures K8s Secrets take precedence and reduces unnecessary external API calls. | ✅ **Full Support**<br/>Configurable priority: K8s → AWS | ✅ **Full Support**<br/>Configurable priority: K8s → AWS | ✅ **Full Support**<br/>Can implement priority in component logic | ⚠️ **Partial Support**<br/>AWS secrets synced to K8s; no runtime priority |
-| **REQ-007: Caching Mechanism** | Should implement caching to reduce load on backends and improve response times. Cache should support TTL-based expiration and invalidation. Cache hits should not compromise security or RBAC enforcement. | ✅ **Full Support**<br/>In-memory TTL cache; can be extended to distributed cache | ✅ **Full Support**<br/>In-memory TTL cache; can be extended to distributed cache | ✅ **Full Support**<br/>Dapr supports caching; can implement custom cache logic | ⚠️ **Partial Support**<br/>K8s API server caching; no application-level cache |
-| **REQ-008: Cache Invalidation** | Cache must support invalidation when secrets are updated. Should support both TTL-based expiration and manual invalidation. Cache consistency must be maintained across replicas. | ✅ **Full Support**<br/>TTL + manual invalidation; distributed cache for multi-replica | ✅ **Full Support**<br/>TTL + manual invalidation; distributed cache for multi-replica | ✅ **Full Support**<br/>Dapr cache invalidation; can implement custom logic | ⚠️ **Partial Support**<br/>Relies on K8s watch/refresh; no explicit cache control |
-| **REQ-009: Cache Security** | Cached secrets must maintain the same security posture as direct backend access. Cache must respect RBAC - different callers should not access each other's cached secrets. | ✅ **Full Support**<br/>Cache keyed by caller identity + secret name; RBAC enforced | ✅ **Full Support**<br/>Cache keyed by caller identity + secret name; RBAC enforced | ✅ **Full Support**<br/>Dapr cache respects identity; RBAC maintained | ✅ **Full Support**<br/>K8s API cache respects RBAC natively |
-| **REQ-010: Lightweight Service** | Service should be lightweight with minimal resource footprint. Written in Python3 (latest) and suitable for distroless container images. Should have minimal dependencies. | ✅ **Full Support**<br/>Python3 FastAPI; minimal deps; ~50MB distroless image | ✅ **Full Support**<br/>Python3 FastAPI; minimal deps; ~50MB distroless image | ❌ **Not Supported**<br/>Requires Dapr control plane + sidecars; higher resource overhead | ✅ **Full Support**<br/>Go-based operator; efficient but requires CRD management |
-| **REQ-011: Dynamic Secret Fetching** | Must support fetching secrets that are created dynamically at runtime. Secrets may not exist at application startup but must be available when requested. | ✅ **Full Support**<br/>On-demand API calls; no pre-sync required | ✅ **Full Support**<br/>On-demand API calls; no pre-sync required | ✅ **Full Support**<br/>On-demand Dapr API calls | ⚠️ **Partial Support**<br/>Requires ExternalSecret CRD creation; sync delay possible |
-| **REQ-012: Auditability** | Must log all secret access requests with metadata: caller identity (ServiceAccount, namespace, pod), secret name, backend source, timestamp, and access decision. Logs must be searchable and retainable. | ✅ **Full Support**<br/>Centralized audit logging with comprehensive metadata | ✅ **Full Support**<br/>Centralized audit logging with comprehensive metadata | ✅ **Full Support**<br/>Dapr observability + custom audit logs | ⚠️ **Partial Support**<br/>K8s audit logs + ESO logs; less centralized |
-| **REQ-013: Debug Logging** | Must support comprehensive debug logging controlled via environment variable. Should log request/response details, backend calls, cache operations, and error details for troubleshooting. | ✅ **Full Support**<br/>Environment-controlled debug mode; comprehensive logging | ✅ **Full Support**<br/>Environment-controlled debug mode; comprehensive logging | ✅ **Full Support**<br/>Dapr debug logging + custom logs | ⚠️ **Partial Support**<br/>ESO controller logs; less granular application-level logging |
-| **REQ-014: Request Metadata Extraction** | Must extract and log caller metadata from requests: ServiceAccount name, namespace, pod name, IP address. This enables audit trails and security monitoring. | ✅ **Full Support**<br/>Extracts metadata from mTLS cert + request headers | ✅ **Full Support**<br/>Extracts metadata from mTLS cert + request headers | ✅ **Full Support**<br/>Dapr provides caller identity; can extract additional metadata | ⚠️ **Partial Support**<br/>K8s audit logs provide some metadata; less comprehensive |
-| **REQ-015: Air-Gapped Compatibility** | Must work in air-gapped/isolated environments with no external internet dependencies beyond required APIs (K8s API, AWS APIs). Should not require external package repositories or services. | ✅ **Full Support**<br/>No external deps; uses K8s API + AWS APIs only | ✅ **Full Support**<br/>No external deps; uses K8s API + AWS APIs only | ⚠️ **Partial Support**<br/>Requires Dapr control plane; more complex in air-gapped | ✅ **Full Support**<br/>No external deps; uses K8s API + AWS APIs only |
-| **REQ-016: Operational Complexity** | Should minimize operational overhead. Deployment, configuration, and maintenance should be straightforward. Fewer moving parts are preferred. | ⚠️ **Medium Complexity**<br/>Custom service to deploy/maintain; moderate complexity | ✅ **Low Complexity**<br/>Simpler auth model; easier to operate | ❌ **High Complexity**<br/>Dapr control plane + sidecars; higher operational overhead | ⚠️ **Medium Complexity**<br/>CRD management; operator lifecycle; moderate complexity |
-| **REQ-017: High Availability** | Service should support multi-replica deployments for high availability. Replicas should coordinate cache state if caching is implemented. | ✅ **Full Support**<br/>Stateless design; supports multiple replicas; distributed cache option | ✅ **Full Support**<br/>Stateless design; supports multiple replicas; distributed cache option | ✅ **Full Support**<br/>Dapr supports HA; sidecar per pod provides redundancy | ✅ **Full Support**<br/>Operator supports multiple replicas; HA controller |
-| **REQ-018: Performance** | Should minimize latency for secret fetching. Caching should reduce backend load. Should handle concurrent requests efficiently. | ✅ **Full Support**<br/>In-memory cache reduces latency; async support; connection pooling | ✅ **Full Support**<br/>In-memory cache reduces latency; async support; connection pooling | ⚠️ **Partial Support**<br/>Sidecar adds latency; Dapr cache helps but overhead exists | ⚠️ **Partial Support**<br/>Sync model adds delay; K8s API caching helps |
-| **REQ-019: Scalability** | Should scale horizontally to handle increasing load. Cache coordination should not become a bottleneck. | ✅ **Full Support**<br/>Horizontal scaling; distributed cache for coordination | ✅ **Full Support**<br/>Horizontal scaling; distributed cache for coordination | ✅ **Full Support**<br/>Dapr scales with application pods; sidecar per pod | ⚠️ **Partial Support**<br/>Operator scaling limited; K8s API server may bottleneck |
+| **REQ-002: Read-Only Access** | Service provides read-only access to secrets. Applications can only fetch/read secrets, not create, update, or delete them. Secret management (creation/updates) is handled separately by cluster administrators or CI/CD pipelines. | ✅ **Full Support**<br/>GET endpoints only; no write operations | ✅ **Full Support**<br/>GET endpoints only; no write operations | ✅ **Full Support**<br/>Read-only Dapr API | ✅ **Full Support**<br/>Read-only sync from external sources |
+| **REQ-003: No Secret Mounting** | Applications must not mount secrets as volumes or files. All secret access must be programmatic via API calls to maintain flexibility and reduce coupling. | ✅ **Full Support**<br/>No mounting required; API-only access | ✅ **Full Support**<br/>No mounting required; API-only access | ✅ **Full Support**<br/>No mounting required; SDK/API access | ❌ **Not Supported**<br/>Requires applications to read K8s Secrets (may require mounting) |
+| **REQ-004: Kubernetes RBAC Enforcement** | Must maintain Kubernetes RBAC policies. Applications should only access secrets they are authorized to access based on their ServiceAccount and RBAC rules. | ✅ **Full Support**<br/>ServiceAccount passthrough maintains native RBAC | ⚠️ **Partial Support**<br/>Custom authorization logic required; not using native RBAC | ✅ **Full Support**<br/>Can leverage K8s RBAC through Dapr components | ✅ **Full Support**<br/>Applications use native K8s RBAC to read synced secrets |
+| **REQ-005: mTLS Support** | All communication between applications and the secrets broker must use mutual TLS (mTLS) for authentication and encryption. Both client and server must authenticate each other. | ✅ **Full Support**<br/>Built-in mTLS implementation | ✅ **Full Support**<br/>Built-in mTLS implementation | ✅ **Full Support**<br/>Dapr Sentry provides mTLS automatically | ❌ **Not Supported**<br/>No API interface; direct K8s API access |
+| **REQ-006: Multi-Backend Support** | Must support fetching secrets from multiple backends: Kubernetes Secrets (primary) and AWS Secrets Manager (secondary). Should check K8s Secrets first, then fallback to configured backends. | ✅ **Full Support**<br/>Native support for both backends with priority logic | ✅ **Full Support**<br/>Native support for both backends with priority logic | ✅ **Full Support**<br/>Dapr components for both backends | ⚠️ **Partial Support**<br/>Syncs AWS → K8s; doesn't provide unified API |
+| **REQ-007: Backend Priority Logic** | Must check Kubernetes Secrets first before querying other backends. This ensures K8s Secrets take precedence and reduces unnecessary external API calls. | ✅ **Full Support**<br/>Configurable priority: K8s → AWS | ✅ **Full Support**<br/>Configurable priority: K8s → AWS | ✅ **Full Support**<br/>Can implement priority in component logic | ⚠️ **Partial Support**<br/>AWS secrets synced to K8s; no runtime priority |
+| **REQ-008: Caching Mechanism** | Should implement caching to reduce load on backends and improve response times. Cache should support TTL-based expiration and invalidation. Cache hits should not compromise security or RBAC enforcement. **Note**: Deferred to long-term implementation. | ⚠️ **Deferred**<br/>Not in MVP; planned for long-term with in-memory TTL cache | ⚠️ **Deferred**<br/>Not in MVP; planned for long-term with in-memory TTL cache | ⚠️ **Deferred**<br/>Dapr supports caching but not implemented in MVP | ⚠️ **Partial Support**<br/>K8s API server caching; no application-level cache |
+| **REQ-009: Cache Invalidation** | Cache must support invalidation when secrets are updated. Should support both TTL-based expiration and manual invalidation. Cache consistency must be maintained across replicas. **Note**: Deferred to long-term implementation. | ⚠️ **Deferred**<br/>Not in MVP; planned for long-term | ⚠️ **Deferred**<br/>Not in MVP; planned for long-term | ⚠️ **Deferred**<br/>Not in MVP; planned for long-term | ⚠️ **Partial Support**<br/>Relies on K8s watch/refresh; no explicit cache control |
+| **REQ-010: Cache Security** | Cached secrets must maintain the same security posture as direct backend access. Cache must respect RBAC - different callers should not access each other's cached secrets. **Note**: Deferred to long-term implementation. | ⚠️ **Deferred**<br/>Not in MVP; planned for long-term | ⚠️ **Deferred**<br/>Not in MVP; planned for long-term | ⚠️ **Deferred**<br/>Not in MVP; planned for long-term | ✅ **Full Support**<br/>K8s API cache respects RBAC natively |
+| **REQ-011: Lightweight Service** | Service should be lightweight with minimal resource footprint. Written in Python3 (latest) and suitable for distroless container images. Should have minimal dependencies. | ✅ **Full Support**<br/>Python3 FastAPI; minimal deps; ~50MB distroless image | ✅ **Full Support**<br/>Python3 FastAPI; minimal deps; ~50MB distroless image | ❌ **Not Supported**<br/>Requires Dapr control plane + sidecars; higher resource overhead | ✅ **Full Support**<br/>Go-based operator; efficient but requires CRD management |
+| **REQ-012: Dynamic Secret Fetching** | Must support fetching secrets that are created dynamically at runtime. Secrets may not exist at application startup but must be available when requested. | ✅ **Full Support**<br/>On-demand API calls; no pre-sync required | ✅ **Full Support**<br/>On-demand API calls; no pre-sync required | ✅ **Full Support**<br/>On-demand Dapr API calls | ⚠️ **Partial Support**<br/>Requires ExternalSecret CRD creation; sync delay possible |
+| **REQ-013: Auditability** | Must log all secret access requests with metadata: caller identity (ServiceAccount, namespace, pod), secret name, backend source, timestamp, and access decision. Logs must be searchable and retainable. | ✅ **Full Support**<br/>Centralized audit logging with comprehensive metadata | ✅ **Full Support**<br/>Centralized audit logging with comprehensive metadata | ✅ **Full Support**<br/>Dapr observability + custom audit logs | ⚠️ **Partial Support**<br/>K8s audit logs + ESO logs; less centralized |
+| **REQ-014: Debug Logging** | Must support comprehensive debug logging controlled via environment variable. Should log request/response details, backend calls, and error details for troubleshooting. | ✅ **Full Support**<br/>Environment-controlled debug mode; comprehensive logging | ✅ **Full Support**<br/>Environment-controlled debug mode; comprehensive logging | ✅ **Full Support**<br/>Dapr debug logging + custom logs | ⚠️ **Partial Support**<br/>ESO controller logs; less granular application-level logging |
+| **REQ-015: Request Metadata Extraction** | Must extract and log caller metadata from requests: ServiceAccount name, namespace, pod name, IP address. This enables audit trails and security monitoring. | ✅ **Full Support**<br/>Extracts metadata from mTLS cert + request headers | ✅ **Full Support**<br/>Extracts metadata from mTLS cert + request headers | ✅ **Full Support**<br/>Dapr provides caller identity; can extract additional metadata | ⚠️ **Partial Support**<br/>K8s audit logs provide some metadata; less comprehensive |
+| **REQ-016: Air-Gapped Compatibility** | Must work in air-gapped/isolated environments with no external internet dependencies beyond required APIs (K8s API, AWS APIs). Should not require external package repositories or services. | ✅ **Full Support**<br/>No external deps; uses K8s API + AWS APIs only | ✅ **Full Support**<br/>No external deps; uses K8s API + AWS APIs only | ⚠️ **Partial Support**<br/>Requires Dapr control plane; more complex in air-gapped | ✅ **Full Support**<br/>No external deps; uses K8s API + AWS APIs only |
+| **REQ-017: Operational Complexity** | Should minimize operational overhead. Deployment, configuration, and maintenance should be straightforward. Fewer moving parts are preferred. | ⚠️ **Medium Complexity**<br/>Custom service to deploy/maintain; moderate complexity | ✅ **Low Complexity**<br/>Simpler auth model; easier to operate | ❌ **High Complexity**<br/>Dapr control plane + sidecars; higher operational overhead | ⚠️ **Medium Complexity**<br/>CRD management; operator lifecycle; moderate complexity |
+| **REQ-018: High Availability** | Service should support multi-replica deployments for high availability. Stateless design enables easy horizontal scaling. | ✅ **Full Support**<br/>Stateless design; supports multiple replicas | ✅ **Full Support**<br/>Stateless design; supports multiple replicas | ✅ **Full Support**<br/>Dapr supports HA; sidecar per pod provides redundancy | ✅ **Full Support**<br/>Operator supports multiple replicas; HA controller |
+| **REQ-019: Performance** | Should minimize latency for secret fetching. Should handle concurrent requests efficiently with async support and connection pooling. **Note**: Caching deferred to long-term. | ✅ **Full Support**<br/>Async support; connection pooling; no caching in MVP | ✅ **Full Support**<br/>Async support; connection pooling; no caching in MVP | ⚠️ **Partial Support**<br/>Sidecar adds latency; async support available | ⚠️ **Partial Support**<br/>Sync model adds delay; K8s API caching helps |
+| **REQ-020: Scalability** | Should scale horizontally to handle increasing load. Stateless design enables linear scaling. | ✅ **Full Support**<br/>Horizontal scaling; stateless design | ✅ **Full Support**<br/>Horizontal scaling; stateless design | ✅ **Full Support**<br/>Dapr scales with application pods; sidecar per pod | ⚠️ **Partial Support**<br/>Operator scaling limited; K8s API server may bottleneck |
 
 ### Requirement Summary
 
@@ -514,9 +498,9 @@ This matrix evaluates each option against the core requirements and design crite
 - ❌ **Not Supported**: Requirement is not met or contradicts the approach
 
 **Key Findings:**
-- **Option 1** meets all core requirements with full support for caching, RBAC, and multi-backend access
-- **Option 2** similar to Option 1 but requires custom authorization (not native RBAC)
-- **Option 3** meets requirements but adds significant operational complexity
+- **Option 1** meets all core requirements with full support for RBAC and multi-backend access. Caching deferred to long-term.
+- **Option 2** similar to Option 1 but requires custom authorization (not native RBAC). Caching deferred to long-term.
+- **Option 3** meets requirements but adds significant operational complexity. Caching deferred to long-term.
 - **Option 4** fails to meet core requirements (no just-in-time API, requires secret mounting)
 
 ## Consequences
@@ -524,18 +508,19 @@ This matrix evaluates each option against the core requirements and design crite
 ### Positive
 
 1. **Security**: RBAC enforcement maintained through ServiceAccount passthrough
-2. **Flexibility**: Applications can fetch secrets dynamically via API calls
+2. **Flexibility**: Applications can fetch secrets dynamically via API calls (read-only)
 3. **Centralized Control**: Single point for secret access policies and audit logging
 4. **Backend Agnostic**: Easy to add additional secret backends in the future
-5. **Performance**: Caching reduces load on Kubernetes API and AWS Secrets Manager
+5. **Simplicity**: Read-only model simplifies security model and reduces attack surface
+6. **Stateless Design**: No caching in MVP makes service fully stateless and easier to scale
 
 ### Negative
 
 1. **Additional Service**: Requires deployment and maintenance of the secrets broker service
-2. **Network Latency**: Additional network hop for secret access (mitigated by caching)
+2. **Network Latency**: Additional network hop for secret access (no caching in MVP)
 3. **Token Management**: Need to handle ServiceAccount token rotation and refresh
-4. **Cache Invalidation**: Requires logic to invalidate cache when secrets are updated
-5. **Single Point of Failure**: Service availability critical for application startup (mitigated by high availability deployment)
+4. **Single Point of Failure**: Service availability critical for application startup (mitigated by high availability deployment)
+5. **Read-Only Limitation**: Applications cannot create or update secrets through this service (by design)
 
 ### Mitigation Strategies
 
@@ -590,14 +575,12 @@ graph LR
         AUTH[Auth Module<br/>mTLS + SA Token]
         K8S_BACKEND[K8s Backend]
         AWS_BACKEND[AWS Backend]
-        CACHE[Cache Manager]
         AUDIT[Audit Logger]
     end
     
     API --> AUTH
-    AUTH --> CACHE
-    CACHE --> K8S_BACKEND
-    CACHE --> AWS_BACKEND
+    AUTH --> K8S_BACKEND
+    AUTH --> AWS_BACKEND
     API --> AUDIT
     K8S_BACKEND --> AUDIT
     AWS_BACKEND --> AUDIT
@@ -628,11 +611,6 @@ MTLS_ENABLED=true
 MTLS_CA_CERT_PATH=/etc/tls/ca.crt
 MTLS_SERVER_CERT_PATH=/etc/tls/server.crt
 MTLS_SERVER_KEY_PATH=/etc/tls/server.key
-
-# Caching
-CACHE_ENABLED=true
-CACHE_TTL_SECONDS=300
-CACHE_MAX_SIZE=1000
 
 # Logging
 LOG_LEVEL=INFO
@@ -694,10 +672,9 @@ subjects:
 
 - `secrets_broker_requests_total` - Total API requests
 - `secrets_broker_requests_duration_seconds` - Request latency
-- `secrets_broker_cache_hits_total` - Cache hit count
-- `secrets_broker_cache_misses_total` - Cache miss count
 - `secrets_broker_backend_errors_total` - Backend error count
 - `secrets_broker_secrets_fetched_total` - Secrets fetched by backend
+- `secrets_broker_backend_requests_total` - Backend requests by type (k8s/aws)
 
 ### Audit Log Format
 
@@ -716,8 +693,7 @@ subjects:
   },
   "response": {
     "status_code": 200,
-    "backend": "kubernetes",
-    "cache_hit": true
+    "backend": "kubernetes"
   },
   "duration_ms": 15
 }
