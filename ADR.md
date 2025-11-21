@@ -15,8 +15,9 @@ Current challenges:
 1. **Direct Secret Access Limitations**: Some applications cannot directly read Kubernetes Secrets due to RBAC constraints, security policies, or architectural patterns
 2. **Multi-Backend Complexity**: Secrets exist in both Kubernetes Secrets and AWS Secrets Manager, requiring different access mechanisms
 3. **Dynamic Secret Lifecycle**: Secrets are created at various times (before, during, or after application deployment), requiring just-in-time fetching capabilities
-4. **Security Requirements**: Need for mTLS, auditability, and secure communication patterns
-5. **Operational Overhead**: Mounting secrets as volumes/files creates coupling and reduces flexibility
+4. **Secret Scoping Requirements**: Need to support both namespace-scoped secrets (specific to applications/environments) and cluster-wide secrets (shared across all services)
+5. **Security Requirements**: Need for mTLS, auditability, and secure communication patterns
+6. **Operational Overhead**: Mounting secrets as volumes/files creates coupling and reduces flexibility
 
 ## Decision Drivers
 
@@ -81,24 +82,31 @@ A centralized Python service that acts as a proxy, leveraging Kubernetes Service
 
 ```mermaid
 sequenceDiagram
-    participant App as Application Pod
+    participant App as Application Pod<br/>(Namespace: production)
     participant SB as Secrets Broker
     participant Auth as K8s Auth Passthrough
     participant K8S as K8s API Server
     participant AWS as AWS Secrets Manager
     
-    App->>SB: GET /secrets/{name} (mTLS)
-    SB->>SB: Extract ServiceAccount from mTLS cert
+    App->>SB: GET /v1/secrets/app-db-credentials (mTLS)
+    SB->>SB: Extract ServiceAccount + Namespace from mTLS cert
+    Note over SB: Namespace: production<br/>ServiceAccount: frontend-sa
     SB->>Auth: Get ServiceAccount token
     Auth->>K8S: Authenticate with SA token
     K8S->>K8S: RBAC Check
-    alt Secret in K8s
-        K8S->>SB: Return K8s Secret
+    
+    alt Secret in caller namespace (production)
+        K8S->>SB: Return namespace-scoped secret
         SB->>App: Return secret
-    else Secret not in K8s
-        SB->>AWS: Fetch from Secrets Manager (IRSA)
-        AWS->>SB: Return secret
-        SB->>App: Return secret
+    else Secret not in caller namespace
+        alt Cluster-wide secret exists
+            K8S->>SB: Return cluster-wide secret (kube-system)
+            SB->>App: Return secret
+        else Secret not in K8s
+            SB->>AWS: Fetch from Secrets Manager<br/>Path: /app/secrets/production/app-db-credentials
+            AWS->>SB: Return secret
+            SB->>App: Return secret
+        end
     end
 ```
 
@@ -116,11 +124,81 @@ sequenceDiagram
 - ❌ ServiceAccount token rotation handling needed
 - ❌ No caching in MVP (deferred to long-term)
 
+#### Secret Scoping Model
+
+The service supports two types of secret scoping:
+
+**1. Namespace-Scoped Secrets**: Secrets specific to a namespace, accessible only by applications in that namespace
+**2. Cluster-Wide Secrets**: Centrally managed secrets accessible by all services across the cluster
+
+```mermaid
+graph TB
+    subgraph "Cluster-Wide Secrets"
+        CW_SECRET1[shared-db-credentials<br/>Namespace: kube-system]
+        CW_SECRET2[cluster-certificate<br/>Namespace: kube-system]
+    end
+    
+    subgraph "Namespace: production"
+        NS_PROD_SECRET1[app-db-credentials]
+        NS_PROD_SECRET2[api-keys]
+        PROD_POD1[Frontend Pod]
+        PROD_POD2[Backend Pod]
+    end
+    
+    subgraph "Namespace: staging"
+        NS_STAGING_SECRET1[app-db-credentials]
+        NS_STAGING_SECRET2[api-keys]
+        STAGING_POD1[Frontend Pod]
+        STAGING_POD2[Backend Pod]
+    end
+    
+    subgraph "Secrets Broker Service"
+        SB[Secrets Broker]
+        NS_RESOLVER[Namespace Resolver]
+    end
+    
+    PROD_POD1 -->|GET /v1/secrets/app-db-credentials| SB
+    PROD_POD2 -->|GET /v1/secrets/shared-db-credentials| SB
+    STAGING_POD1 -->|GET /v1/secrets/app-db-credentials| SB
+    STAGING_POD2 -->|GET /v1/secrets/shared-db-credentials| SB
+    
+    SB --> NS_RESOLVER
+    NS_RESOLVER -->|Check caller namespace| NS_PROD_SECRET1
+    NS_RESOLVER -->|Check caller namespace| NS_STAGING_SECRET1
+    NS_RESOLVER -->|Check cluster-wide| CW_SECRET1
+    
+    style CW_SECRET1 fill:#ffd700
+    style CW_SECRET2 fill:#ffd700
+    style NS_PROD_SECRET1 fill:#50c878
+    style NS_STAGING_SECRET1 fill:#50c878
+    style SB fill:#4a90e2
+    style NS_RESOLVER fill:#7b68ee
+```
+
+**Secret Resolution Logic**:
+
+1. **Extract Caller Context**: Service extracts caller's namespace from ServiceAccount (via mTLS certificate)
+2. **Namespace-Scoped Lookup**: First checks for secret in caller's namespace
+3. **Cluster-Wide Lookup**: If not found, checks cluster-wide secrets (typically in `kube-system` or `platform` namespace)
+4. **AWS Fallback**: If not found in K8s, queries AWS Secrets Manager with namespace-aware path
+
+**API Behavior**:
+- `GET /v1/secrets/{name}` - Automatically resolves namespace from caller context
+- `GET /v1/secrets/{name}?namespace={ns}` - Optional explicit namespace override (subject to RBAC)
+- Cluster-wide secrets are typically prefixed or stored in a designated namespace (e.g., `kube-system`, `platform`)
+
+**RBAC Enforcement**:
+- Namespace-scoped secrets: Only accessible by ServiceAccounts with RBAC permissions in that namespace
+- Cluster-wide secrets: Accessible by ServiceAccounts with ClusterRole permissions
+- ServiceAccount passthrough ensures native K8s RBAC is enforced
+
 #### Implementation Notes
-- Service extracts ServiceAccount identity from mTLS client certificate
+- Service extracts ServiceAccount identity and namespace from mTLS client certificate
 - Uses Kubernetes client library with ServiceAccount token
 - Read-only operations: GET requests only, no write/update/delete endpoints
-- Audit logs include: caller identity, secret name, backend source, timestamp
+- Secret scoping: Supports both namespace-scoped and cluster-wide secrets
+- Namespace resolution: Automatically resolves caller namespace, with optional override
+- Audit logs include: caller identity, namespace, secret name, backend source, timestamp
 
 ---
 
@@ -756,22 +834,47 @@ graph LR
 ### API Endpoints
 
 ```
-GET  /healthz                    # Health check
-GET  /readyz                     # Readiness check
-GET  /metrics                    # Prometheus metrics
-GET  /v1/secrets/{name}          # Fetch secret by name
-GET  /v1/secrets/{name}/{key}    # Fetch specific key from secret
-POST /v1/secrets/batch           # Batch fetch multiple secrets
+GET  /healthz                              # Health check
+GET  /readyz                               # Readiness check
+GET  /metrics                              # Prometheus metrics
+GET  /v1/secrets/{name}                    # Fetch secret by name (auto-resolves namespace)
+GET  /v1/secrets/{name}?namespace={ns}     # Fetch secret with explicit namespace override
+GET  /v1/secrets/{name}/{key}              # Fetch specific key from secret (namespace-scoped)
+GET  /v1/secrets/{name}/{key}?namespace={ns} # Fetch key with explicit namespace override
+POST /v1/secrets/batch                     # Batch fetch multiple secrets
 ```
+
+**Secret Scoping Behavior**:
+
+1. **Default Behavior** (`GET /v1/secrets/{name}`):
+   - Automatically extracts caller's namespace from ServiceAccount (via mTLS certificate)
+   - First checks for secret in caller's namespace
+   - Falls back to cluster-wide secrets (if RBAC allows)
+   - Finally checks AWS Secrets Manager with namespace-aware path
+
+2. **Explicit Namespace Override** (`GET /v1/secrets/{name}?namespace={ns}`):
+   - Allows explicit namespace specification
+   - Subject to RBAC: caller must have permissions in specified namespace
+   - Useful for cross-namespace access (if authorized) or cluster-wide secrets
+
+3. **Cluster-Wide Secrets**:
+   - Typically stored in `kube-system` or `platform` namespace
+   - Accessible by ServiceAccounts with ClusterRole permissions
+   - Examples: shared database credentials, cluster certificates, license keys
+
+4. **AWS Secrets Manager Path Structure**:
+   - Namespace-scoped: `/app/secrets/{namespace}/{secret-name}`
+   - Cluster-wide: `/app/secrets/cluster/{secret-name}` or `/app/secrets/shared/{secret-name}`
 
 ### Environment Variables
 
 ```bash
 # Backend Configuration
 SECRETS_BACKEND=k8s,aws-secrets-manager
-K8S_NAMESPACE=default
+K8S_CLUSTER_WIDE_NAMESPACE=kube-system  # Namespace for cluster-wide secrets
 AWS_REGION=us-east-1
 AWS_SECRETS_MANAGER_PREFIX=/app/secrets
+AWS_CLUSTER_SECRETS_PREFIX=/app/secrets/cluster  # Prefix for cluster-wide secrets in AWS
 
 # Security
 MTLS_ENABLED=true
@@ -851,30 +954,143 @@ subjects:
   "caller": {
     "service_account": "frontend-service",
     "namespace": "production",
-    "pod": "frontend-abc123"
+    "pod": "frontend-abc123",
+    "ip_address": "10.244.1.5"
   },
   "request": {
     "method": "GET",
     "path": "/v1/secrets/database-credentials",
-    "secret_name": "database-credentials"
+    "secret_name": "database-credentials",
+    "requested_namespace": "production",
+    "resolved_namespace": "production",
+    "secret_scope": "namespace-scoped"
   },
   "response": {
     "status_code": 200,
-    "backend": "kubernetes"
+    "backend": "kubernetes",
+    "secret_namespace": "production",
+    "secret_type": "namespace-scoped"
   },
   "duration_ms": 15
 }
 ```
 
+**Audit Log Fields for Secret Scoping**:
+- `requested_namespace`: Namespace specified in request (if provided via query parameter)
+- `resolved_namespace`: Actual namespace used for secret lookup (caller's namespace or override)
+- `secret_scope`: Either `"namespace-scoped"` or `"cluster-wide"`
+- `secret_namespace`: Namespace where secret was found
+- `secret_type`: Type of secret retrieved (helps distinguish namespace vs cluster-wide)
+
+## Secret Scoping and Access Control
+
+### Namespace-Scoped Secrets
+
+**Use Case**: Secrets specific to a namespace that should only be accessible by applications in that namespace.
+
+**Examples**:
+- Application-specific database credentials per environment (production, staging, dev)
+- API keys unique to each namespace
+- Service-to-service authentication tokens scoped to namespace
+
+**Access Pattern**:
+1. Application in `production` namespace requests `app-db-credentials`
+2. Service checks `production` namespace first
+3. Returns secret if found and RBAC allows
+4. Falls back to cluster-wide secrets if not found
+
+**RBAC Requirements**:
+- ServiceAccount must have `get` permission on secrets in its namespace
+- Typically granted via Role and RoleBinding
+
+### Cluster-Wide Secrets
+
+**Use Case**: Centrally managed secrets that need to be accessible by all services across the cluster.
+
+**Examples**:
+- Shared database credentials for all services
+- Cluster-wide TLS certificates
+- License keys or API keys shared across services
+- External service credentials (monitoring, logging)
+
+**Access Pattern**:
+1. Application requests `shared-db-credentials`
+2. Service checks caller's namespace first (not found)
+3. Checks cluster-wide namespace (e.g., `kube-system` or `platform`)
+4. Returns secret if found and RBAC allows
+
+**RBAC Requirements**:
+- ServiceAccount must have ClusterRole with `get` permission on secrets
+- Typically granted via ClusterRoleBinding
+- More restrictive than namespace-scoped access
+
+**Storage Locations**:
+- **Kubernetes**: Typically stored in `kube-system` or `platform` namespace
+- **AWS Secrets Manager**: Under `/app/secrets/cluster/` or `/app/secrets/shared/` prefix
+
+### Secret Resolution Flow
+
+```mermaid
+flowchart TD
+    A[Application Request] --> B[Extract Namespace from ServiceAccount]
+    B --> C{Secret Name Pattern?}
+    C -->|Starts with 'shared-' or 'cluster-'| D[Check Cluster-Wide Namespace]
+    C -->|Regular name| E[Check Caller Namespace]
+    E -->|Found| F[Return Namespace-Scoped Secret]
+    E -->|Not Found| D
+    D -->|Found| G[Return Cluster-Wide Secret]
+    D -->|Not Found| H[Check AWS Secrets Manager]
+    H -->|Namespace Path| I[Return AWS Secret]
+    H -->|Cluster Path| J[Return AWS Cluster Secret]
+    F --> K[RBAC Check]
+    G --> K
+    I --> K
+    J --> K
+    K -->|Allowed| L[Return Secret to Application]
+    K -->|Denied| M[Return 403 Forbidden]
+```
+
+### Best Practices
+
+1. **Naming Conventions**:
+   - Namespace-scoped: Use descriptive names (e.g., `app-db-credentials`, `api-keys`)
+   - Cluster-wide: Prefix with `shared-` or `cluster-` (e.g., `shared-db-credentials`, `cluster-certificate`)
+
+2. **RBAC Design**:
+   - Grant namespace-scoped access by default (least privilege)
+   - Use ClusterRoles sparingly for truly shared secrets
+   - Document which secrets are cluster-wide and why
+
+3. **Secret Organization**:
+   - Keep namespace-scoped secrets in their respective namespaces
+   - Centralize cluster-wide secrets in designated namespace (`kube-system` or `platform`)
+   - Use consistent naming patterns for easy identification
+
+4. **AWS Secrets Manager Structure**:
+   ```
+   /app/secrets/
+   ├── production/
+   │   ├── app-db-credentials
+   │   └── api-keys
+   ├── staging/
+   │   ├── app-db-credentials
+   │   └── api-keys
+   └── cluster/
+       ├── shared-db-credentials
+       └── cluster-certificate
+   ```
+
 ## Security Considerations
 
 1. **mTLS**: All client connections require valid mTLS certificates
 2. **RBAC**: ServiceAccount passthrough maintains Kubernetes RBAC enforcement
-3. **Secret Encryption**: Secrets in transit encrypted via TLS, secrets at rest encrypted by backend
-4. **Audit Logging**: All secret access logged with caller identity
-5. **Least Privilege**: ServiceAccount has minimal required permissions
-6. **Network Policies**: Restrict network access to secrets broker service
-7. **Pod Security**: Run with non-root user, read-only root filesystem
+3. **Namespace Isolation**: Namespace-scoped secrets are automatically isolated by RBAC
+4. **Cluster-Wide Access Control**: Cluster-wide secrets require explicit ClusterRole permissions
+5. **Secret Encryption**: Secrets in transit encrypted via TLS, secrets at rest encrypted by backend
+6. **Audit Logging**: All secret access logged with caller identity, namespace, and secret scope
+7. **Least Privilege**: ServiceAccount has minimal required permissions (namespace-scoped by default)
+8. **Network Policies**: Restrict network access to secrets broker service
+9. **Pod Security**: Run with non-root user, read-only root filesystem
 
 ## References
 
