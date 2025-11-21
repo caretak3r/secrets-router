@@ -717,6 +717,119 @@ This matrix evaluates each option against the core requirements and design crite
 
 ## Implementation Plan
 
+### Development Workflow: Sidecar to Dapr Integration
+
+The following diagram illustrates the complete development workflow from transforming the existing secrets-broker sidecar into a fully-fledged Kubernetes service, through deployment and testing, to eventual Dapr integration.
+
+```mermaid
+flowchart TD
+    START([Existing Secrets-Broker<br/>Sidecar]) --> MVP1_DEV[MVP1: Transform Sidecar<br/>to K8s Service]
+    
+    MVP1_DEV --> PHASE1[Phase 1: Core Service<br/>Weeks 1-2<br/>- FastAPI with mTLS<br/>- K8s Secrets backend<br/>- ServiceAccount passthrough<br/>- Health endpoints]
+    
+    PHASE1 --> PHASE2[Phase 2: AWS Integration<br/>Week 3<br/>- AWS Secrets Manager<br/>- IRSA configuration<br/>- Backend priority logic]
+    
+    PHASE2 --> PHASE3[Phase 3: Security & Observability<br/>Week 4<br/>- Audit logging<br/>- Request metadata<br/>- Prometheus metrics]
+    
+    PHASE3 --> PHASE4[Phase 4: Production Hardening<br/>Week 5<br/>- Distroless image<br/>- Resource limits<br/>- Security policies]
+    
+    PHASE4 --> HELM_DEV[Helm Chart Development<br/>- Service deployment<br/>- ServiceAccount & RBAC<br/>- ConfigMaps & Secrets<br/>- Service & Ingress<br/>- Values.yaml]
+    
+    HELM_DEV --> DEPLOY[Deployment<br/>- Deploy to dev cluster<br/>- Configure IRSA<br/>- Set up mTLS certs<br/>- Validate RBAC]
+    
+    DEPLOY --> TESTING[Testing & Validation<br/>Week 6<br/>- Unit tests<br/>- Integration tests<br/>- Load testing<br/>- Security testing<br/>- Air-gapped validation]
+    
+    TESTING --> MVP1_PROD{MVP1 Production<br/>Ready?}
+    
+    MVP1_PROD -->|Yes| MVP1_DEPLOY[MVP1 Production Deployment<br/>- Deploy to production<br/>- Monitor & observe<br/>- Gather usage metrics]
+    
+    MVP1_PROD -->|No| PHASE4
+    
+    MVP1_DEPLOY --> MVP1_OPERATIONS[MVP1 Operations<br/>- Monitor performance<br/>- Collect usage patterns<br/>- Identify improvements<br/>- Build operational expertise]
+    
+    MVP1_OPERATIONS --> MVP2_DECISION{MVP2 Decision Point<br/>Evaluate Dapr Need}
+    
+    MVP2_DECISION -->|Skip MVP2| END1([Continue with MVP1])
+    
+    MVP2_DECISION -->|Proceed to MVP2| MVP2_PHASE1[MVP2 Phase 1: Dapr Control Plane<br/>- Deploy Dapr Operator<br/>- Deploy Dapr Sentry<br/>- Deploy Dapr Placement<br/>- Configure certificates]
+    
+    MVP2_PHASE1 --> MVP2_PHASE2[MVP2 Phase 2: Component Development<br/>- Wrap MVP1 service as Dapr component<br/>- Implement Dapr Secrets API<br/>- Create K8s Secrets component<br/>- Create AWS Secrets component]
+    
+    MVP2_PHASE2 --> MVP2_PHASE3[MVP2 Phase 3: Application Migration<br/>- Update app SDKs<br/>- Migrate to Dapr sidecar<br/>- Gradual rollout<br/>- Maintain backward compatibility]
+    
+    MVP2_PHASE3 --> MVP2_PHASE4[MVP2 Phase 4: Advanced Features<br/>- Dapr observability<br/>- Resilience patterns<br/>- Rate limiting<br/>- Multi-language SDKs]
+    
+    MVP2_PHASE4 --> MVP2_TESTING[MVP2 Testing<br/>- Component testing<br/>- Integration testing<br/>- Performance validation<br/>- Migration validation]
+    
+    MVP2_TESTING --> MVP2_PROD{MVP2 Production<br/>Ready?}
+    
+    MVP2_PROD -->|Yes| MVP2_DEPLOY[MVP2 Production Deployment<br/>- Deploy Dapr components<br/>- Migrate applications<br/>- Monitor migration]
+    
+    MVP2_PROD -->|No| MVP2_PHASE2
+    
+    MVP2_DEPLOY --> MVP2_OPTIMIZE[MVP2 Optimization<br/>- Optimize components<br/>- Remove MVP1 service<br/>- Update documentation]
+    
+    MVP2_OPTIMIZE --> END2([Dapr Integration Complete])
+    
+    style START fill:#e1f5ff
+    style MVP1_DEV fill:#4a90e2
+    style PHASE1 fill:#7b68ee
+    style PHASE2 fill:#7b68ee
+    style PHASE3 fill:#7b68ee
+    style PHASE4 fill:#7b68ee
+    style HELM_DEV fill:#50c878
+    style DEPLOY fill:#ffd700
+    style TESTING fill:#ff6b6b
+    style MVP1_DEPLOY fill:#50c878
+    style MVP1_OPERATIONS fill:#87ceeb
+    style MVP2_PHASE1 fill:#9370db
+    style MVP2_PHASE2 fill:#9370db
+    style MVP2_PHASE3 fill:#9370db
+    style MVP2_PHASE4 fill:#9370db
+    style MVP2_TESTING fill:#ff6b6b
+    style MVP2_DEPLOY fill:#50c878
+    style END1 fill:#e1f5ff
+    style END2 fill:#e1f5ff
+```
+
+**Key Workflow Stages**:
+
+1. **MVP1 Development (Weeks 1-5)**: Transform sidecar into standalone Kubernetes service
+   - Phase 1-4: Core service development
+   - Incremental feature development
+
+2. **Helm Chart Development**: Create deployment artifacts
+   - Service manifests
+   - RBAC resources
+   - Configuration management
+   - Values customization
+
+3. **Deployment**: Deploy to development/test environment
+   - Infrastructure setup
+   - Configuration validation
+   - Initial testing
+
+4. **Testing & Validation (Week 6)**: Comprehensive testing
+   - Functional testing
+   - Performance testing
+   - Security validation
+
+5. **MVP1 Production**: Production deployment and operations
+   - Production rollout
+   - Monitoring and metrics collection
+   - Operational learning
+
+6. **MVP2 Decision Point**: Evaluate need for Dapr
+   - Based on MVP1 learnings
+   - Business case validation
+   - Option to skip if MVP1 sufficient
+
+7. **MVP2 Development**: Dapr integration (if proceeding)
+   - Control plane deployment
+   - Component development
+   - Application migration
+   - Advanced features
+
 ### MVP1: Standalone Kubernetes Service (Weeks 1-6)
 
 **Goal**: Transform the secrets-broker sidecar into a fully-fledged Kubernetes service that meets all core requirements.
