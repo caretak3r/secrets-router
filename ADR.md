@@ -451,17 +451,122 @@ sequenceDiagram
 
 ## Decision Outcome
 
-**Chosen Option: Option 1 - Secrets Broker Service with AWS Secrets Manager + Kubernetes Secrets Support (Centralized Proxy with K8s Auth Passthrough)**
+**Phased Approach: MVP1 → MVP2**
 
-### Rationale
+We have chosen a phased implementation strategy that balances immediate requirements with long-term architectural improvements:
 
-1. **Meets Core Requirements**: Provides just-in-time API-based secret fetching without mounting secrets
+- **MVP1**: Transform the secrets-broker sidecar into a fully-fledged Kubernetes service (Option 1)
+- **MVP2**: Integrate with Dapr for enhanced capabilities (Option 3)
+
+### MVP1: Standalone Kubernetes Service (Option 1)
+
+**Chosen Solution**: Secrets Broker Service with AWS Secrets Manager + Kubernetes Secrets Support (Centralized Proxy with K8s Auth Passthrough)
+
+#### Rationale for MVP1
+
+1. **Meets All Core Requirements**: Provides just-in-time API-based secret fetching without mounting secrets, satisfying all immediate business needs
 2. **Security**: Maintains Kubernetes RBAC enforcement through ServiceAccount passthrough, ensuring least-privilege access
-3. **Flexibility**: Supports dynamic secret fetching from multiple backends with configurable priority
-4. **Lightweight**: Python3 service with minimal dependencies, suitable for distroless containers
-5. **Auditability**: Centralized logging of all secret access requests with caller identity
+3. **Flexibility**: Supports dynamic secret fetching from multiple backends with configurable priority (K8s Secrets → AWS Secrets Manager)
+4. **Lightweight**: Python3 service with minimal dependencies, suitable for distroless containers (~50MB image)
+5. **Auditability**: Centralized logging of all secret access requests with comprehensive caller identity metadata
 6. **mTLS Support**: Built-in mTLS for secure pod-to-service communication
 7. **Air-Gapped Compatible**: No external dependencies beyond Kubernetes API and AWS APIs
+8. **Operational Simplicity**: Single service to deploy and maintain; no additional control plane components
+9. **Fast Time-to-Market**: Can be implemented quickly without learning new frameworks or infrastructure
+
+#### Why Start with MVP1 (Standalone Service)
+
+**Risk Mitigation**: Starting with a standalone service allows us to:
+- Validate the core concept and API design before committing to a larger infrastructure investment
+- Gather real-world usage patterns and performance metrics
+- Identify any gaps in requirements through actual usage
+- Build operational expertise with a simpler system
+
+**Incremental Value Delivery**: 
+- MVP1 delivers immediate value by solving the core problem: applications can fetch secrets dynamically via API
+- No need to wait for complex infrastructure setup (Dapr control plane)
+- Faster iteration cycles for API improvements and bug fixes
+
+**Lower Operational Overhead**:
+- Single service deployment vs. Dapr control plane (Operator, Sentry, Placement)
+- Simpler debugging and troubleshooting
+- Easier to understand and maintain for the team
+- Reduced resource footprint (no sidecars per pod)
+
+**Foundation for MVP2**:
+- The API design and patterns established in MVP1 can be preserved when migrating to Dapr
+- Service can be containerized and deployed as a Dapr component later
+- Lessons learned from MVP1 inform MVP2 implementation
+
+### MVP2: Dapr Integration (Option 3)
+
+**Future Enhancement**: Integrate with Dapr for enhanced capabilities and standardized patterns
+
+#### Rationale for MVP2
+
+**Enhanced Capabilities**:
+1. **Standardized API**: Dapr Secrets API provides a consistent interface across different secret stores
+2. **Built-in Observability**: Dapr provides distributed tracing, metrics, and logging out of the box
+3. **Service Mesh Integration**: Automatic mTLS via Dapr Sentry without custom implementation
+4. **Component Ecosystem**: Access to Dapr's growing ecosystem of components and integrations
+5. **Multi-Language Support**: Applications can use Dapr SDKs in multiple languages (not just Python)
+6. **Advanced Features**: Rate limiting, circuit breakers, and retry policies built into Dapr
+
+**Why Defer to MVP2**:
+- **Complexity**: Dapr requires control plane deployment and sidecar injection, increasing operational complexity
+- **Learning Curve**: Team needs time to learn Dapr patterns and best practices
+- **Infrastructure Readiness**: Dapr control plane must be deployed and maintained cluster-wide
+- **Not Required for MVP**: MVP1 fully satisfies all current requirements; Dapr adds capabilities but isn't necessary for initial delivery
+
+**Migration Path**:
+- MVP1 service can be wrapped as a Dapr component, preserving existing API contracts
+- Applications can gradually migrate to Dapr SDKs while maintaining backward compatibility
+- Both approaches can coexist during transition period
+
+### Why Split into MVP1 and MVP2?
+
+**1. Incremental Delivery**
+- MVP1 delivers value immediately with a simpler solution
+- MVP2 adds advanced capabilities once we understand usage patterns
+- Reduces risk of over-engineering for unproven requirements
+
+**2. Learning and Validation**
+- MVP1 validates the core concept and API design
+- Real-world usage informs MVP2 requirements
+- Performance and scalability data guides Dapr integration decisions
+
+**3. Operational Maturity**
+- Team builds operational expertise with simpler MVP1 system
+- Gradual introduction of Dapr reduces operational risk
+- Easier to troubleshoot and debug standalone service first
+
+**4. Resource Efficiency**
+- MVP1 has minimal resource footprint (single service)
+- Dapr adds overhead (control plane + sidecars); defer until needed
+- Cost-effective for initial deployment
+
+**5. Flexibility**
+- MVP1 provides immediate solution without vendor/framework lock-in
+- MVP2 migration can be evaluated based on MVP1 learnings
+- Option to skip MVP2 if MVP1 proves sufficient
+
+### Requirements Support
+
+**MVP1 (Option 1) Support**:
+- ✅ All core requirements fully supported (REQ-001 through REQ-021)
+- ✅ Just-in-time API, read-only access, no mounting, RBAC enforcement
+- ✅ mTLS, multi-backend support, auditability, air-gapped compatibility
+- ✅ Lightweight, scalable, and deployable via Helm
+
+**MVP2 (Option 3) Enhancements**:
+- ✅ All MVP1 requirements maintained
+- ✅ Additional: Standardized Dapr Secrets API, built-in observability
+- ✅ Additional: Service mesh capabilities, multi-language SDK support
+- ✅ Additional: Advanced resilience patterns (circuit breakers, retries)
+
+### Decision Summary
+
+**MVP1** provides a production-ready solution that meets all current requirements with minimal complexity. **MVP2** enhances the solution with Dapr's advanced capabilities once we have validated the approach and built operational maturity. This phased strategy balances immediate needs with long-term architectural improvements while minimizing risk and maximizing value delivery.
 
 ### Requirements Comparison Matrix
 
@@ -534,36 +639,97 @@ This matrix evaluates each option against the core requirements and design crite
 
 ## Implementation Plan
 
-### Phase 1: Core Service (Weeks 1-2)
+### MVP1: Standalone Kubernetes Service (Weeks 1-6)
+
+**Goal**: Transform the secrets-broker sidecar into a fully-fledged Kubernetes service that meets all core requirements.
+
+#### Phase 1: Core Service (Weeks 1-2)
 - Python3 FastAPI service with mTLS support
 - Kubernetes Secrets backend integration
 - ServiceAccount token passthrough mechanism
-- Basic caching implementation
-- Health check endpoints
+- Health check endpoints (`/healthz`, `/readyz`)
+- Basic API endpoints (`GET /v1/secrets/{name}`, `GET /v1/secrets/{name}/{key}`)
 
-### Phase 2: AWS Integration (Week 3)
+#### Phase 2: AWS Integration (Week 3)
 - AWS Secrets Manager integration
 - IRSA (IAM Role for ServiceAccount) configuration
 - Backend priority logic (K8s first, then AWS)
 - Error handling and fallback mechanisms
+- Backend selection and routing logic
 
-### Phase 3: Security & Observability (Week 4)
-- Comprehensive audit logging
-- Request metadata extraction (caller identity, namespace, etc.)
-- Debug logging via environment variable
-- Metrics and Prometheus integration
+#### Phase 3: Security & Observability (Week 4)
+- Comprehensive audit logging with caller metadata
+- Request metadata extraction (ServiceAccount, namespace, pod name, IP)
+- Debug logging via environment variable (`DEBUG_MODE`)
+- Metrics endpoint (`/metrics`) with Prometheus integration
+- Structured JSON logging
 
-### Phase 4: Production Hardening (Week 5)
+#### Phase 4: Production Hardening (Week 5)
 - Distroless container image optimization
 - Resource limits and requests
 - Security policies (PodSecurityPolicy/PSA)
+- Helm chart development
 - Documentation and runbooks
 
-### Phase 5: Testing & Validation (Week 6)
-- Integration tests
+#### Phase 5: Testing & Validation (Week 6)
+- Unit tests for core functionality
+- Integration tests with K8s and AWS backends
 - Load testing
-- Security testing (penetration testing)
+- Security testing (penetration testing, mTLS validation)
 - Air-gapped environment validation
+
+**MVP1 Deliverables**:
+- Production-ready standalone Kubernetes service
+- Helm chart for deployment
+- Comprehensive documentation
+- Test suite and validation results
+- Operational runbooks
+
+### MVP2: Dapr Integration (Future - Timeline TBD)
+
+**Goal**: Integrate with Dapr to leverage standardized APIs, built-in observability, and service mesh capabilities.
+
+#### Phase 1: Dapr Control Plane Deployment
+- Deploy Dapr control plane (Operator, Sentry, Placement)
+- Configure Dapr for cluster-wide deployment
+- Set up Dapr certificate management
+- Validate Dapr installation and health
+
+#### Phase 2: Secrets Broker as Dapr Component
+- Wrap MVP1 service as Dapr secret store component
+- Implement Dapr Secrets API interface
+- Create custom Dapr components for K8s Secrets and AWS Secrets Manager
+- Maintain backward compatibility with MVP1 API
+
+#### Phase 3: Application Migration
+- Update application SDKs to use Dapr Secrets API
+- Migrate applications to Dapr sidecar pattern
+- Gradual rollout with feature flags
+- Maintain dual support during transition period
+
+#### Phase 4: Advanced Dapr Features
+- Leverage Dapr observability (tracing, metrics, logging)
+- Implement Dapr resilience patterns (circuit breakers, retries)
+- Configure Dapr rate limiting policies
+- Multi-language SDK support
+
+#### Phase 5: Optimization & Decommission
+- Optimize Dapr component performance
+- Remove MVP1 standalone service (if fully migrated)
+- Update documentation and runbooks
+- Final validation and testing
+
+**MVP2 Prerequisites**:
+- MVP1 successfully deployed and operational
+- Real-world usage patterns and performance data collected
+- Team familiarity with MVP1 operations
+- Business case validated for Dapr investment
+
+**MVP2 Decision Point**:
+- Evaluate MVP1 performance and capabilities
+- Assess need for Dapr's advanced features
+- Consider operational complexity vs. benefits
+- Option to skip MVP2 if MVP1 proves sufficient
 
 ## Technical Specifications
 
