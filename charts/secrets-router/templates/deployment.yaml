@@ -71,6 +71,8 @@ spec:
             port: {{ .Values.healthChecks.liveness.port }}
           initialDelaySeconds: {{ .Values.healthChecks.liveness.initialDelaySeconds }}
           periodSeconds: {{ .Values.healthChecks.liveness.periodSeconds }}
+          timeoutSeconds: 3
+          failureThreshold: 3
         {{- end }}
         {{- if .Values.healthChecks.readiness.enabled }}
         readinessProbe:
@@ -79,6 +81,8 @@ spec:
             port: {{ .Values.healthChecks.readiness.port }}
           initialDelaySeconds: {{ .Values.healthChecks.readiness.initialDelaySeconds }}
           periodSeconds: {{ .Values.healthChecks.readiness.periodSeconds }}
+          timeoutSeconds: 3
+          failureThreshold: 3
         {{- end }}
         securityContext:
           allowPrivilegeEscalation: false

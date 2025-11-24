@@ -41,9 +41,9 @@ env:
   DEBUG_MODE: "false"
   LOG_LEVEL: "INFO"
   DAPR_HTTP_PORT: "3500"
-  DAPR_GRPC_PORT: "50001"
-  K8S_SECRET_STORE: "kubernetes-secrets"
-  AWS_SECRET_STORE: "aws-secrets-manager"
+  # Secret store priority: comma-separated list of Dapr component names
+  # Secrets will be fetched from stores in order until found
+  # Default: kubernetes-secrets first, then aws-secrets-manager
   SECRET_STORE_PRIORITY: "kubernetes-secrets,aws-secrets-manager"
   SERVER_PORT: "8080"
 
