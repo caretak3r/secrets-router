@@ -1,0 +1,92 @@
+# Secrets Router Service Configuration
+
+# Image configuration
+image:
+  repository: secrets-router
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+
+# Deployment configuration
+deployment:
+  replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# Dapr configuration
+dapr:
+  enabled: true
+  appId: secrets-router
+  appPort: 8080
+  config: ""
+  logLevel: info
+  enableApiLogging: false
+  metrics:
+    enabled: true
+  tracing:
+    enabled: false
+
+# Environment variables
+env:
+  DEBUG_MODE: "false"
+  LOG_LEVEL: "INFO"
+  DAPR_HTTP_PORT: "3500"
+  DAPR_GRPC_PORT: "50001"
+  K8S_SECRET_STORE: "kubernetes-secrets"
+  AWS_SECRET_STORE: "aws-secrets-manager"
+  SECRET_STORE_PRIORITY: "kubernetes-secrets,aws-secrets-manager"
+  SERVER_PORT: "8080"
+
+# ServiceAccount configuration
+serviceAccount:
+  create: true
+  name: secrets-router
+  annotations: {}
+    # For AWS IRSA (if needed):
+    # eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT:role/secrets-router-role
+
+# RBAC configuration
+rbac:
+  create: true
+
+# Pod security
+podSecurity:
+  runAsNonRoot: true
+  runAsUser: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+# Health checks
+healthChecks:
+  liveness:
+    enabled: true
+    path: /healthz
+    port: 8080
+    initialDelaySeconds: 30
+    periodSeconds: 10
+  readiness:
+    enabled: true
+    path: /readyz
+    port: 8080
+    initialDelaySeconds: 10
+    periodSeconds: 5
+
+# Network policies
+networkPolicy:
+  enabled: false
+
+# Ingress (optional)
+ingress:
+  enabled: false
+

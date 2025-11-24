@@ -1,0 +1,55 @@
+{{- if .Values.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "secrets-router.fullname" . }}
+  labels:
+    {{- include "secrets-router.labels" . | nindent 4 }}
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "secrets-router.fullname" . }}
+  labels:
+    {{- include "secrets-router.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "secrets-router.fullname" . }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "secrets-router.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "secrets-router.fullname" . }}-cluster
+  labels:
+    {{- include "secrets-router.labels" . | nindent 4 }}
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list"]
+  resourceNames: []
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "secrets-router.fullname" . }}-cluster
+  labels:
+    {{- include "secrets-router.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "secrets-router.fullname" . }}-cluster
+subjects:
+- kind: ServiceAccount
+  name: {{ include "secrets-router.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+{{- end }}
+

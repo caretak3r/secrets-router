@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "secrets-router.fullname" . }}
+  labels:
+    {{- include "secrets-router.labels" . | nindent 4 }}
+    app.kubernetes.io/component: secrets-router
+spec:
+  replicas: {{ .Values.deployment.replicas }}
+  selector:
+    matchLabels:
+      {{- include "secrets-router.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        dapr.io/enabled: "{{ .Values.dapr.enabled }}"
+        dapr.io/app-id: "{{ .Values.dapr.appId }}"
+        dapr.io/app-port: "{{ .Values.dapr.appPort }}"
+        {{- if .Values.dapr.config }}
+        dapr.io/config: "{{ .Values.dapr.config }}"
+        {{- end }}
+        dapr.io/log-level: "{{ .Values.dapr.logLevel }}"
+        dapr.io/enable-api-logging: "{{ .Values.dapr.enableApiLogging }}"
+        {{- if .Values.dapr.metrics.enabled }}
+        dapr.io/enable-metrics: "true"
+        {{- end }}
+        {{- if .Values.dapr.tracing.enabled }}
+        dapr.io/enable-tracing: "true"
+        {{- end }}
+      labels:
+        {{- include "secrets-router.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- if .Values.serviceAccount.create }}
+      serviceAccountName: {{ include "secrets-router.serviceAccountName" . }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: {{ .Values.podSecurity.runAsNonRoot }}
+        runAsUser: {{ .Values.podSecurity.runAsUser }}
+        fsGroup: {{ .Values.podSecurity.fsGroup }}
+        seccompProfile:
+          type: {{ .Values.podSecurity.seccompProfile.type }}
+      containers:
+      - name: secrets-router
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+        - name: http
+          containerPort: {{ .Values.service.targetPort }}
+          protocol: TCP
+        env:
+        {{- range $key, $value := .Values.env }}
+        - name: {{ $key }}
+          value: {{ $value | quote }}
+        {{- end }}
+        {{- if .Values.serviceAccount.annotations }}
+        {{- if index .Values.serviceAccount.annotations "eks.amazonaws.com/role-arn" }}
+        - name: AWS_ROLE_ARN
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.annotations['eks.amazonaws.com/role-arn']
+        - name: AWS_WEB_IDENTITY_TOKEN_FILE
+          value: /var/run/secrets/eks.amazonaws.com/serviceaccount/token
+        {{- end }}
+        {{- end }}
+        resources:
+          {{- toYaml .Values.deployment.resources | nindent 10 }}
+        {{- if .Values.healthChecks.liveness.enabled }}
+        livenessProbe:
+          httpGet:
+            path: {{ .Values.healthChecks.liveness.path }}
+            port: {{ .Values.healthChecks.liveness.port }}
+          initialDelaySeconds: {{ .Values.healthChecks.liveness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.healthChecks.liveness.periodSeconds }}
+        {{- end }}
+        {{- if .Values.healthChecks.readiness.enabled }}
+        readinessProbe:
+          httpGet:
+            path: {{ .Values.healthChecks.readiness.path }}
+            port: {{ .Values.healthChecks.readiness.port }}
+          initialDelaySeconds: {{ .Values.healthChecks.readiness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.healthChecks.readiness.periodSeconds }}
+        {{- end }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+      {{- if .Values.serviceAccount.annotations }}
+      {{- if index .Values.serviceAccount.annotations "eks.amazonaws.com/role-arn" }}
+      volumes:
+      - name: aws-iam-token
+        projected:
+          sources:
+          - serviceAccountToken:
+              path: token
+              expirationSeconds: 86400
+              audience: sts.amazonaws.com
+      {{- end }}
+      {{- end }}
+

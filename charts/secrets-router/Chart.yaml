@@ -1,0 +1,7 @@
+apiVersion: v2
+name: secrets-router
+description: Secrets Router Service - Dapr-based secrets broker
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+
