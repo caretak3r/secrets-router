@@ -42,7 +42,7 @@ graph TB
     end
     
     subgraph "AWS Services"
-        AWS_SM[AWS Secrets Manager<br/>Path: /app/secrets/{namespace}/{secret}]
+        AWS_SM["AWS Secrets Manager<br/>Path: /app/secrets/namespace/secret"]
         IRSA[IAM Role for ServiceAccount]
     end
     
