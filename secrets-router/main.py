@@ -165,16 +165,76 @@ app = FastAPI(
 router = SecretsRouter(dapr_client, SECRET_STORE_PRIORITY)
 
 
-@app.get("/healthz")
+@app.get("/healthz", status_code=200)
 async def health_check():
-    """Health check endpoint"""
-    return {"status": "healthy"}
+    """
+    Liveness probe endpoint.
+    Returns HTTP 200 if the service process is running.
+    """
+    return {
+        "status": "healthy",
+        "service": "secrets-router",
+        "version": "1.0.0"
+    }
 
 
 @app.get("/readyz")
 async def readiness_check():
-    """Readiness check endpoint"""
-    return {"status": "ready"}
+    """
+    Readiness probe endpoint.
+    Returns HTTP 200 only if the service is ready to receive traffic.
+    Checks Dapr sidecar connectivity.
+    """
+    try:
+        # Check if Dapr sidecar is reachable
+        # Try to connect to Dapr sidecar health endpoint
+        health_url = f"{DAPR_HTTP_ENDPOINT}/v1.0/healthz"
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            response = await client.get(health_url)
+            if response.status_code == 200:
+                return {
+                    "status": "ready",
+                    "service": "secrets-router",
+                    "dapr_sidecar": "connected",
+                    "version": "1.0.0"
+                }
+            else:
+                # Dapr sidecar not healthy
+                logger.warning(f"Dapr sidecar health check returned {response.status_code}")
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "status": "not_ready",
+                        "service": "secrets-router",
+                        "dapr_sidecar": "unhealthy",
+                        "error": "Dapr sidecar not ready"
+                    }
+                )
+    except httpx.RequestError as e:
+        # Cannot connect to Dapr sidecar
+        logger.warning(f"Cannot connect to Dapr sidecar: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "status": "not_ready",
+                "service": "secrets-router",
+                "dapr_sidecar": "disconnected",
+                "error": "Cannot connect to Dapr sidecar"
+            }
+        )
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        logger.warning(f"Readiness check failed: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "status": "not_ready",
+                "service": "secrets-router",
+                "error": str(e)
+            }
+        )
 
 
 @app.get("/secrets/{secret_name}/{secret_key}")

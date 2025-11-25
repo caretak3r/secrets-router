@@ -46,10 +46,10 @@ kubectl apply -f dapr-components/aws-secrets-manager-component.yaml -n productio
 ```python
 import requests
 
-# Get secret value
+# Get secret value (always returns decoded value)
 response = requests.get(
     "http://secrets-router:8080/secrets/database-credentials/password",
-    params={"namespace": "production", "decode": "true"}
+    params={"namespace": "production"}
 )
 secret_value = response.json()["value"]
 ```
@@ -81,14 +81,13 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for detailed diagrams.
 ### Get Secret
 
 ```
-GET /secrets/{secret_name}/{secret_key}?namespace={namespace}&decode={true|false}
+GET /secrets/{secret_name}/{secret_key}?namespace={namespace}
 ```
 
 **Parameters:**
 - `secret_name` (path, required): Name of the secret
 - `secret_key` (path, required): Key within the secret
 - `namespace` (query, required): Kubernetes namespace where secret is stored
-- `decode` (query, optional): If `true`, return decoded value; if `false` (default), return base64 encoded
 
 **Response:**
 ```json
@@ -96,17 +95,53 @@ GET /secrets/{secret_name}/{secret_key}?namespace={namespace}&decode={true|false
   "backend": "kubernetes-secrets",
   "secret_name": "database-credentials",
   "secret_key": "password",
-  "value": "mypassword123",
-  "encoded": false
+  "value": "mypassword123"
 }
 ```
+
+**Note**: All secret values are automatically decoded and returned as plain text. Kubernetes secrets (base64 encoded) are decoded automatically.
 
 ### Health Checks
 
 ```
-GET /healthz  # Liveness probe
-GET /readyz   # Readiness probe
+GET /healthz  # Liveness probe - returns HTTP 200 if service is running
+GET /readyz   # Readiness probe - returns HTTP 200 if ready to receive traffic
 ```
+
+**Health Check Responses:**
+
+`/healthz` (HTTP 200):
+```json
+{
+  "status": "healthy",
+  "service": "secrets-router",
+  "version": "1.0.0"
+}
+```
+
+`/readyz` (HTTP 200 when ready, HTTP 503 when not ready):
+
+When ready (HTTP 200):
+```json
+{
+  "status": "ready",
+  "service": "secrets-router",
+  "dapr_sidecar": "connected",
+  "version": "1.0.0"
+}
+```
+
+When not ready (HTTP 503):
+```json
+{
+  "status": "not_ready",
+  "service": "secrets-router",
+  "dapr_sidecar": "disconnected",
+  "error": "Cannot connect to Dapr sidecar"
+}
+```
+
+The `/readyz` endpoint checks connectivity to the Dapr sidecar and returns HTTP 503 if the sidecar is not reachable or not healthy. This ensures the service only receives traffic when it can actually process requests.
 
 ## Configuration
 
