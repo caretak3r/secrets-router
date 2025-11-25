@@ -2,46 +2,68 @@
 
 This guide explains how the secrets-router service uses Dapr components to fetch secrets.
 
+**Note**: This service does NOT require a Dapr component for itself. It directly queries Dapr secret store components (kubernetes-secrets, aws-secrets-manager) via HTTP requests to the Dapr sidecar.
+
 ## Architecture
 
 ```mermaid
 graph TB
-    subgraph "Application Pod"
-        APP[App Code]
-        APP_SIDECAR[Dapr Sidecar]
-        APP -->|Dapr API| APP_SIDECAR
+    subgraph "Customer Namespace (e.g., production)"
+        subgraph "Application Pods"
+            APP1[App Pod 1]
+            APP2[App Pod 2]
+        end
+        
+        subgraph "Secrets Router Pod"
+            FASTAPI[FastAPI Service<br/>Port 8080]
+            ROUTER_SIDECAR[Dapr Sidecar<br/>Port 3500 HTTP]
+            FASTAPI <-->|HTTP localhost:3500| ROUTER_SIDECAR
+        end
+        
+        subgraph "Dapr Components"
+            K8S_COMP[Kubernetes Secrets<br/>Component<br/>secretstores.kubernetes]
+            AWS_COMP[AWS Secrets Manager<br/>Component<br/>secretstores.aws.secretsmanager]
+        end
+        
+        subgraph "Kubernetes Secrets"
+            K8S_SECRET1[database-credentials<br/>Namespace: production]
+            K8S_SECRET2[api-keys<br/>Namespace: production]
+        end
     end
     
-    subgraph "Secrets Router Pod"
-        FASTAPI[FastAPI App<br/>DaprClient]
-        ROUTER_SIDECAR[Dapr Sidecar<br/>Port 3500 HTTP<br/>Port 50001 gRPC]
-        FASTAPI <-->|localhost:3500| ROUTER_SIDECAR
+    subgraph "Dapr Control Plane (dapr-system)"
+        DAPR_SENTRY[Dapr Sentry<br/>mTLS]
     end
     
-    subgraph "Dapr Components"
-        K8S_COMP[Kubernetes Secrets<br/>Component<br/>secretstores.kubernetes]
-        AWS_COMP[AWS Secrets Manager<br/>Component<br/>secretstores.aws.secretsmanager]
+    subgraph "AWS Services"
+        AWS_SM[AWS Secrets Manager<br/>Path: /app/secrets/production/{secret}]
+        IRSA[IAM Role for ServiceAccount]
     end
     
-    subgraph "Backend APIs"
-        K8S_API[Kubernetes API<br/>Server]
-        AWS_API[AWS Secrets Manager<br/>API]
-    end
+    APP1 -->|HTTP GET /secrets/{name}/{key}?namespace=production| FASTAPI
+    APP2 -->|HTTP GET /secrets/{name}/{key}?namespace=production| FASTAPI
     
-    APP_SIDECAR -->|GET /v1.0/secrets/{store}/{key}| FASTAPI
+    FASTAPI -->|HTTP GET /v1.0/secrets/kubernetes-secrets/{namespace}/{name}| ROUTER_SIDECAR
+    FASTAPI -->|HTTP GET /v1.0/secrets/aws-secrets-manager/{path}| ROUTER_SIDECAR
+    
     ROUTER_SIDECAR -->|Component API| K8S_COMP
     ROUTER_SIDECAR -->|Component API| AWS_COMP
-    K8S_COMP -->|Read Secrets| K8S_API
-    AWS_COMP -->|Get Secret Value| AWS_API
     
-    style APP fill:#e1f5ff
-    style APP_SIDECAR fill:#4a90e2
+    K8S_COMP -->|Read Secret| K8S_SECRET1
+    K8S_COMP -->|Read Secret| K8S_SECRET2
+    
+    AWS_COMP -->|GetSecretValue| AWS_SM
+    AWS_COMP -.->|IRSA| IRSA
+    
+    ROUTER_SIDECAR -.->|mTLS| DAPR_SENTRY
+    
     style FASTAPI fill:#50c878
     style ROUTER_SIDECAR fill:#4a90e2
     style K8S_COMP fill:#7b68ee
     style AWS_COMP fill:#ff6b6b
-    style K8S_API fill:#87ceeb
-    style AWS_API fill:#ffa07a
+    style K8S_SECRET1 fill:#87ceeb
+    style K8S_SECRET2 fill:#87ceeb
+    style AWS_SM fill:#ffa07a
 ```
 
 ## How It Works
@@ -65,52 +87,46 @@ The secrets-router service:
 
 ```mermaid
 sequenceDiagram
-    participant App as Application
-    participant Router as Secrets Router<br/>FastAPI
-    participant Client as DaprClient
-    participant Sidecar as Dapr Sidecar
+    participant App as Application<br/>(Namespace: production)
+    participant Router as Secrets Router<br/>FastAPI Service
+    participant Sidecar as Dapr Sidecar<br/>(localhost:3500)
     participant K8SComp as Kubernetes<br/>Secrets Component
     participant AWSComp as AWS Secrets<br/>Manager Component
-    participant K8SAPI as Kubernetes API
+    participant K8SAPI as Kubernetes API<br/>(production namespace)
     participant AWSAPI as AWS Secrets<br/>Manager API
     
-    App->>Router: GET /v1/secrets/my-secret
+    App->>Router: GET /secrets/db-creds/password?namespace=production
     Router->>Router: Try kubernetes-secrets first
     
-    Router->>Client: get_secret("kubernetes-secrets", "ns/secret")
-    Client->>Sidecar: HTTP localhost:3500<br/>GET /v1.0/secrets/kubernetes-secrets/ns/secret
+    Router->>Sidecar: HTTP GET /v1.0/secrets/kubernetes-secrets/production/db-creds
     Sidecar->>K8SComp: Component API call
-    K8SComp->>K8SAPI: Read secret from K8s API
+    K8SComp->>K8SAPI: Read secret from production namespace
     
     alt Secret found in Kubernetes
-        K8SAPI-->>K8SComp: Return secret data
-        K8SComp-->>Sidecar: Return secret
-        Sidecar-->>Client: HTTP response
-        Client-->>Router: Secret data
-        Router-->>App: Return secret
+        K8SAPI-->>K8SComp: Return secret (base64 encoded)
+        K8SComp-->>Sidecar: Return secret data
+        Sidecar-->>Router: HTTP response with secret
+        Router->>Router: Auto-decode base64 from K8s
+        Router-->>App: Return decoded value (transparent)
     else Secret not found in Kubernetes
         K8SAPI-->>K8SComp: 404 Not Found
         K8SComp-->>Sidecar: Error
-        Sidecar-->>Client: Error
-        Client-->>Router: Try next store
+        Sidecar-->>Router: Try next store
         
         Router->>Router: Try aws-secrets-manager
-        Router->>Client: get_secret("aws-secrets-manager", "/app/secrets/ns/secret")
-        Client->>Sidecar: HTTP localhost:3500<br/>GET /v1.0/secrets/aws-secrets-manager/...
+        Router->>Sidecar: HTTP GET /v1.0/secrets/aws-secrets-manager/<br/>/app/secrets/production/db-creds
         Sidecar->>AWSComp: Component API call
-        AWSComp->>AWSAPI: GetSecretValue API call
+        AWSComp->>AWSAPI: GetSecretValue(/app/secrets/production/db-creds)
         
         alt Secret found in AWS
-            AWSAPI-->>AWSComp: Return secret
-            AWSComp-->>Sidecar: Return secret
-            Sidecar-->>Client: HTTP response
-            Client-->>Router: Secret data
-            Router-->>App: Return secret
+            AWSAPI-->>AWSComp: Return secret (already decoded)
+            AWSComp-->>Sidecar: Return secret data
+            Sidecar-->>Router: HTTP response with secret
+            Router-->>App: Return value
         else Secret not found anywhere
             AWSAPI-->>AWSComp: ResourceNotFoundException
             AWSComp-->>Sidecar: Error
-            Sidecar-->>Client: Error
-            Client-->>Router: All stores failed
+            Sidecar-->>Router: All stores failed
             Router-->>App: 404 Not Found
         end
     end

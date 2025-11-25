@@ -1,0 +1,16 @@
+apiVersion: v2
+name: secrets-broker
+description: Umbrella chart for Secrets Broker (Dapr + Secrets Router)
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+dependencies:
+  - name: dapr
+    version: "1.16.0"
+    repository: "https://dapr.github.io/helm-charts/"
+    condition: dapr.enabled
+  - name: secrets-router
+    version: "1.0.0"
+    repository: "file://../secrets-router"
+    condition: secrets-router.enabled
+

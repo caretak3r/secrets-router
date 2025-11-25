@@ -1,0 +1,70 @@
+# Umbrella Chart Values for Secrets Broker
+# This chart installs Dapr control plane and Secrets Router service
+
+# Global namespace - all components will be installed in this namespace
+global:
+  namespace: default
+
+# Dapr Control Plane Configuration
+dapr:
+  enabled: true
+  global:
+    mtls:
+      enabled: true
+    metrics:
+      enabled: true
+    tracing:
+      enabled: false
+
+# Secrets Router Service Configuration
+secrets-router:
+  enabled: true
+  
+  # Image configuration
+  image:
+    repository: secrets-router
+    tag: latest
+    pullPolicy: IfNotPresent
+  
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 8080
+  
+  # Deployment configuration
+  deployment:
+    replicas: 2
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  
+  # Dapr configuration
+  dapr:
+    enabled: true
+    appId: secrets-router
+    appPort: 8080
+  
+  # Environment variables
+  env:
+    DEBUG_MODE: "false"
+    LOG_LEVEL: "INFO"
+    DAPR_HTTP_PORT: "3500"
+    # Secret store priority: kubernetes-secrets first, then aws-secrets-manager
+    SECRET_STORE_PRIORITY: "kubernetes-secrets,aws-secrets-manager"
+    # AWS Secrets Manager path prefix (if using AWS Secrets Manager)
+    # Secrets will be fetched from: {AWS_SECRETS_PATH_PREFIX}/{namespace}/{secret_name}
+    # Example: /app/secrets/production/database-credentials
+    AWS_SECRETS_PATH_PREFIX: "/app/secrets"
+    SERVER_PORT: "8080"
+  
+  # ServiceAccount for AWS IRSA (if using AWS Secrets Manager)
+  serviceAccount:
+    create: true
+    annotations: {}
+      # Uncomment and configure if using AWS IRSA:
+      # eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT:role/secrets-router-role
+

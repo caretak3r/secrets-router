@@ -1,0 +1,375 @@
+# Developer Guide: Consuming Secrets
+
+This guide shows developers how to consume secrets from the Secrets Router service in their applications.
+
+## Overview
+
+The Secrets Router service provides a simple HTTP API to fetch secrets from Kubernetes Secrets or AWS Secrets Manager. Secrets are **namespace-scoped** - they exist in the namespace where your application is deployed.
+
+## Quick Start
+
+### 1. Basic Secret Retrieval
+
+```bash
+# Get a secret value (base64 encoded by default)
+curl http://secrets-router:8080/secrets/my-secret/database-password?namespace=production
+
+# Get decoded value
+curl http://secrets-router:8080/secrets/my-secret/database-password?namespace=production&decode=true
+```
+
+### 2. Response Format
+
+```json
+{
+  "backend": "kubernetes-secrets",
+  "secret_name": "my-secret",
+  "secret_key": "database-password",
+  "value": "cGFzc3dvcmQxMjM=",  // base64 encoded (if decode=false)
+  "encoded": true
+}
+```
+
+## API Endpoint
+
+```
+GET /secrets/{secret_name}/{secret_key}?namespace={namespace}&decode={true|false}
+```
+
+### Parameters
+
+- **`secret_name`** (path, required): Name of the Kubernetes Secret or AWS Secrets Manager secret
+- **`secret_key`** (path, required): Key within the secret to retrieve
+- **`namespace`** (query, required): Kubernetes namespace where the secret is stored
+- **`decode`** (query, optional): If `true`, returns decoded value; if `false` (default), returns base64 encoded
+
+## Examples
+
+### Python Example
+
+```python
+import requests
+import base64
+
+# Service URL (use service name in Kubernetes)
+SECRETS_ROUTER_URL = "http://secrets-router:8080"
+NAMESPACE = "production"  # Your application namespace
+
+def get_secret(secret_name: str, secret_key: str, decode: bool = True) -> str:
+    """
+    Get secret value from Secrets Router.
+    
+    Args:
+        secret_name: Name of the secret
+        secret_key: Key within the secret
+        decode: If True, return decoded value; if False, return base64 encoded
+    
+    Returns:
+        Secret value as string
+    """
+    url = f"{SECRETS_ROUTER_URL}/secrets/{secret_name}/{secret_key}"
+    params = {
+        "namespace": NAMESPACE,
+        "decode": "true" if decode else "false"
+    }
+    
+    response = requests.get(url, params=params)
+    response.raise_for_status()
+    
+    data = response.json()
+    return data["value"]
+
+# Usage
+db_password = get_secret("database-credentials", "password")
+api_key = get_secret("api-keys", "external-service-key")
+```
+
+### Go Example
+
+```go
+package main
+
+import (
+    "encoding/json"
+    "fmt"
+    "net/http"
+    "net/url"
+)
+
+type SecretResponse struct {
+    Backend    string `json:"backend"`
+    SecretName string `json:"secret_name"`
+    SecretKey  string `json:"secret_key"`
+    Value      string `json:"value"`
+    Encoded    bool   `json:"encoded"`
+}
+
+func getSecret(secretRouterURL, namespace, secretName, secretKey string, decode bool) (string, error) {
+    u, err := url.Parse(fmt.Sprintf("%s/secrets/%s/%s", secretRouterURL, secretName, secretKey))
+    if err != nil {
+        return "", err
+    }
+    
+    q := u.Query()
+    q.Set("namespace", namespace)
+    if decode {
+        q.Set("decode", "true")
+    }
+    u.RawQuery = q.Encode()
+    
+    resp, err := http.Get(u.String())
+    if err != nil {
+        return "", err
+    }
+    defer resp.Body.Close()
+    
+    if resp.StatusCode != http.StatusOK {
+        return "", fmt.Errorf("failed to get secret: %d", resp.StatusCode)
+    }
+    
+    var secretResp SecretResponse
+    if err := json.NewDecoder(resp.Body).Decode(&secretResp); err != nil {
+        return "", err
+    }
+    
+    return secretResp.Value, nil
+}
+
+func main() {
+    password, err := getSecret(
+        "http://secrets-router:8080",
+        "production",
+        "database-credentials",
+        "password",
+        true, // decode
+    )
+    if err != nil {
+        panic(err)
+    }
+    fmt.Println("Password:", password)
+}
+```
+
+### Node.js/TypeScript Example
+
+```typescript
+import axios from 'axios';
+
+const SECRETS_ROUTER_URL = 'http://secrets-router:8080';
+const NAMESPACE = 'production';
+
+interface SecretResponse {
+  backend: string;
+  secret_name: string;
+  secret_key: string;
+  value: string;
+  encoded: boolean;
+}
+
+async function getSecret(
+  secretName: string,
+  secretKey: string,
+  decode: boolean = true
+): Promise<string> {
+  const response = await axios.get<SecretResponse>(
+    `${SECRETS_ROUTER_URL}/secrets/${secretName}/${secretKey}`,
+    {
+      params: {
+        namespace: NAMESPACE,
+        decode: decode.toString(),
+      },
+    }
+  );
+  
+  return response.data.value;
+}
+
+// Usage
+const dbPassword = await getSecret('database-credentials', 'password');
+const apiKey = await getSecret('api-keys', 'external-service-key');
+```
+
+## Secret Storage Locations
+
+### Kubernetes Secrets
+
+Secrets stored as Kubernetes Secrets are accessed using:
+- **Format**: `namespace/secret-name`
+- **Location**: Same namespace as your application
+- **Auto-decoding**: K8s secrets are automatically decoded (base64 → plain text)
+
+**Example:**
+```bash
+# Secret exists in Kubernetes as:
+# kubectl get secret database-credentials -n production
+
+# Access via API:
+GET /secrets/database-credentials/password?namespace=production
+```
+
+### AWS Secrets Manager
+
+Secrets stored in AWS Secrets Manager are accessed using:
+- **Format**: `{path-prefix}/{namespace}/{secret-name}`
+- **Default path prefix**: `/app/secrets`
+- **Location**: Configured in umbrella chart values
+
+**Example:**
+```bash
+# Secret exists in AWS Secrets Manager as:
+# /app/secrets/production/database-credentials
+
+# Access via API:
+GET /secrets/database-credentials/password?namespace=production
+```
+
+## Secret Resolution Priority
+
+The service tries secret stores in this order:
+
+1. **Kubernetes Secrets** (in the specified namespace)
+2. **AWS Secrets Manager** (if configured)
+
+If a secret is found in Kubernetes, it's returned immediately. If not found, AWS Secrets Manager is checked.
+
+## Best Practices
+
+### 1. Use Environment Variables for Configuration
+
+```python
+import os
+
+SECRETS_ROUTER_URL = os.getenv("SECRETS_ROUTER_URL", "http://secrets-router:8080")
+NAMESPACE = os.getenv("NAMESPACE", "default")  # Usually set by Kubernetes
+```
+
+### 2. Cache Secrets When Appropriate
+
+```python
+from functools import lru_cache
+
+@lru_cache(maxsize=100)
+def get_cached_secret(secret_name: str, secret_key: str) -> str:
+    """Cache secret values to reduce API calls."""
+    return get_secret(secret_name, secret_key)
+```
+
+### 3. Handle Errors Gracefully
+
+```python
+import requests
+from requests.exceptions import RequestException
+
+def get_secret_safe(secret_name: str, secret_key: str, default: str = None) -> str:
+    """Get secret with fallback to default value."""
+    try:
+        return get_secret(secret_name, secret_key)
+    except RequestException as e:
+        logger.warning(f"Failed to get secret {secret_name}/{secret_key}: {e}")
+        if default:
+            return default
+        raise
+```
+
+### 4. Use Decoded Values
+
+Always use `decode=true` for readability, unless you specifically need base64 encoding:
+
+```python
+# Good - decoded value
+password = get_secret("database-credentials", "password", decode=True)
+
+# Only if you need base64
+encoded = get_secret("database-credentials", "password", decode=False)
+```
+
+## Common Patterns
+
+### Application Startup
+
+```python
+# Load secrets at startup
+class Config:
+    def __init__(self):
+        self.db_password = get_secret("database-credentials", "password")
+        self.api_key = get_secret("api-keys", "external-service")
+        self.redis_password = get_secret("redis-credentials", "password")
+
+config = Config()
+```
+
+### Lazy Loading
+
+```python
+class SecretManager:
+    def __init__(self):
+        self._cache = {}
+    
+    def get(self, secret_name: str, secret_key: str) -> str:
+        cache_key = f"{secret_name}:{secret_key}"
+        if cache_key not in self._cache:
+            self._cache[cache_key] = get_secret(secret_name, secret_key)
+        return self._cache[cache_key]
+```
+
+## Troubleshooting
+
+### Secret Not Found (404)
+
+```bash
+# Check if secret exists in namespace
+kubectl get secret my-secret -n production
+
+# Check if secret exists in AWS Secrets Manager
+aws secretsmanager describe-secret --secret-id /app/secrets/production/my-secret
+```
+
+### Wrong Namespace
+
+Make sure you're using the correct namespace where your application is deployed:
+
+```python
+# Get namespace from Kubernetes downward API
+NAMESPACE = open('/var/run/secrets/kubernetes.io/serviceaccount/namespace').read().strip()
+```
+
+### Connection Issues
+
+```bash
+# Test connectivity from your pod
+kubectl exec -it <your-pod> -n <namespace> -- \
+  curl http://secrets-router:8080/healthz
+```
+
+## Security Considerations
+
+1. **Never log secret values** - Always mask secrets in logs
+2. **Use HTTPS in production** - Configure TLS for secrets-router service
+3. **Namespace isolation** - Secrets are namespace-scoped, providing isolation
+4. **RBAC** - Ensure your ServiceAccount has proper RBAC permissions
+
+## Migration from Direct Secret Access
+
+If you're currently mounting secrets as volumes:
+
+**Before:**
+```yaml
+volumes:
+- name: secrets
+  secret:
+    secretName: database-credentials
+```
+
+**After:**
+```python
+# Use Secrets Router API
+password = get_secret("database-credentials", "password", namespace="production")
+```
+
+## Support
+
+For issues or questions:
+- Check logs: `kubectl logs -n <namespace> -l app.kubernetes.io/name=secrets-router`
+- Verify Dapr components: `kubectl get components -n <namespace>`
+- Review ADR: See `ADR.md` for architecture details
+

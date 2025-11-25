@@ -45,6 +45,10 @@ env:
   # Secrets will be fetched from stores in order until found
   # Default: kubernetes-secrets first, then aws-secrets-manager
   SECRET_STORE_PRIORITY: "kubernetes-secrets,aws-secrets-manager"
+  # AWS Secrets Manager path prefix for path-based secrets
+  # Format: {AWS_SECRETS_PATH_PREFIX}/{namespace}/{secret_name}
+  # Example: /app/secrets/production/database-credentials
+  AWS_SECRETS_PATH_PREFIX: "/app/secrets"
   SERVER_PORT: "8080"
 
 # ServiceAccount configuration

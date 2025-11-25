@@ -1,0 +1,9 @@
+dependencies:
+- name: dapr
+  repository: https://dapr.github.io/helm-charts/
+  version: 1.16.0
+- name: secrets-router
+  repository: file://../secrets-router
+  version: 1.0.0
+digest: sha256:70d73682e7bd146201be12e8e52c12b41bf894bf13657feaf61bdf983252aad6
+generated: "2025-11-25T08:51:02.395662-05:00"

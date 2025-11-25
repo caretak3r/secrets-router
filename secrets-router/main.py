@@ -32,6 +32,7 @@ SECRET_STORE_PRIORITY = os.getenv(
     "SECRET_STORE_PRIORITY",
     "kubernetes-secrets,aws-secrets-manager"
 ).split(",")
+AWS_SECRETS_PATH_PREFIX = os.getenv("AWS_SECRETS_PATH_PREFIX", "/app/secrets")
 SERVER_PORT = int(os.getenv("SERVER_PORT", "8080"))
 
 if DEBUG_MODE:
@@ -46,6 +47,7 @@ dapr_client = httpx.AsyncClient(
 
 logger.info(f"Dapr sidecar endpoint: {DAPR_HTTP_ENDPOINT}")
 logger.info(f"Secret store priority: {SECRET_STORE_PRIORITY}")
+logger.info(f"AWS Secrets Manager path prefix: {AWS_SECRETS_PATH_PREFIX}")
 
 
 class SecretsRouter:
@@ -96,6 +98,21 @@ class SecretsRouter:
                         continue
                     
                     value = secret_data[secret_key]
+                    
+                    # Auto-decode K8s secrets (they come base64 encoded from K8s API)
+                    # AWS Secrets Manager values are already decoded
+                    store_lower = store_name.lower()
+                    if "kubernetes" in store_lower:
+                        # K8s secrets are base64 encoded, decode them automatically
+                        try:
+                            if isinstance(value, str):
+                                # Try to decode base64
+                                decoded_value = base64.b64decode(value).decode('utf-8')
+                                value = decoded_value
+                                logger.debug(f"Auto-decoded base64 value from K8s secret '{secret_name}'")
+                        except Exception as e:
+                            logger.debug(f"Value from K8s secret '{secret_name}' is not base64 encoded: {e}")
+                            # Value might already be decoded or not base64, use as-is
                     
                     # Encode/decode based on request
                     if decode:
@@ -150,22 +167,32 @@ class SecretsRouter:
         store_lower = store_name.lower()
         
         # For Kubernetes secrets component, format: namespace/secret-name
+        # Namespace is required - secrets are namespace-scoped
         if "kubernetes" in store_lower:
-            if namespace:
-                return f"{namespace}/{secret_name}"
-            # Default namespace if not specified
-            return f"default/{secret_name}"
+            if not namespace:
+                raise HTTPException(
+                    status_code=400,
+                    detail="namespace query parameter is required for Kubernetes secrets"
+                )
+            return f"{namespace}/{secret_name}"
         
-        # For AWS Secrets Manager, use full path
+        # For AWS Secrets Manager, use path-based format
+        # Format: {AWS_SECRETS_PATH_PREFIX}/{namespace}/{secret_name}
         if "aws" in store_lower or "secretsmanager" in store_lower:
-            if namespace:
-                return f"/app/secrets/{namespace}/{secret_name}"
-            return f"/app/secrets/cluster/{secret_name}"
+            if not namespace:
+                raise HTTPException(
+                    status_code=400,
+                    detail="namespace query parameter is required for AWS Secrets Manager"
+                )
+            return f"{AWS_SECRETS_PATH_PREFIX}/{namespace}/{secret_name}"
         
         # Default: use namespace/secret-name format
-        if namespace:
-            return f"{namespace}/{secret_name}"
-        return f"default/{secret_name}"
+        if not namespace:
+            raise HTTPException(
+                status_code=400,
+                detail="namespace query parameter is required"
+            )
+        return f"{namespace}/{secret_name}"
     
     async def _get_secret_from_dapr(
         self,
@@ -250,24 +277,31 @@ async def readiness_check():
 async def get_secret(
     secret_name: str,
     secret_key: str,
-    namespace: Optional[str] = Query(None, description="Kubernetes namespace for the secret"),
+    namespace: str = Query(..., description="Kubernetes namespace where the secret is stored (required)"),
     decode: bool = Query(False, description="If true, return decoded value; if false, return base64 encoded")
 ):
     """
     Get secret value from Dapr secret stores.
     
+    **Namespace-Scoped**: All secrets are namespace-scoped. The namespace parameter is required.
+    
+    **Auto-Decoding**: Kubernetes secrets are automatically decoded (base64 → plain text) before returning.
+    AWS Secrets Manager values are already decoded.
+    
+    **Priority**: Tries Kubernetes Secrets first, then AWS Secrets Manager.
+    
     Args:
-        secret_name: Name of the secret
+        secret_name: Name of the Kubernetes Secret or AWS Secrets Manager secret
         secret_key: Key within the secret to retrieve
-        namespace: Kubernetes namespace (used for K8s secrets component)
+        namespace: Kubernetes namespace where the secret is stored (required)
         decode: If true, return decoded value; if false, return base64 encoded (default)
     
     Returns:
         JSON response with secret value (encoded or decoded based on decode parameter)
     
     Example:
-        GET /secrets/my-secret/database-password?namespace=production&decode=false
-        Returns base64 encoded value by default
+        GET /secrets/database-credentials/password?namespace=production&decode=true
+        Returns decoded value (recommended)
     """
     try:
         result = await router.get_secret(
