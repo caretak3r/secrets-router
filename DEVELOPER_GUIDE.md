@@ -11,11 +11,8 @@ The Secrets Router service provides a simple HTTP API to fetch secrets from Kube
 ### 1. Basic Secret Retrieval
 
 ```bash
-# Get a secret value (base64 encoded by default)
+# Get a secret value (always decoded and ready to use)
 curl http://secrets-router:8080/secrets/my-secret/database-password?namespace=production
-
-# Get decoded value
-curl http://secrets-router:8080/secrets/my-secret/database-password?namespace=production&decode=true
 ```
 
 ### 2. Response Format
@@ -25,15 +22,14 @@ curl http://secrets-router:8080/secrets/my-secret/database-password?namespace=pr
   "backend": "kubernetes-secrets",
   "secret_name": "my-secret",
   "secret_key": "database-password",
-  "value": "cGFzc3dvcmQxMjM=",  // base64 encoded (if decode=false)
-  "encoded": true
+  "value": "password123"  // Always decoded and ready to use
 }
 ```
 
 ## API Endpoint
 
 ```
-GET /secrets/{secret_name}/{secret_key}?namespace={namespace}&decode={true|false}
+GET /secrets/{secret_name}/{secret_key}?namespace={namespace}
 ```
 
 ### Parameters
@@ -41,7 +37,6 @@ GET /secrets/{secret_name}/{secret_key}?namespace={namespace}&decode={true|false
 - **`secret_name`** (path, required): Name of the Kubernetes Secret or AWS Secrets Manager secret
 - **`secret_key`** (path, required): Key within the secret to retrieve
 - **`namespace`** (query, required): Kubernetes namespace where the secret is stored
-- **`decode`** (query, optional): If `true`, returns decoded value; if `false` (default), returns base64 encoded
 
 ## Examples
 
@@ -55,23 +50,19 @@ import base64
 SECRETS_ROUTER_URL = "http://secrets-router:8080"
 NAMESPACE = "production"  # Your application namespace
 
-def get_secret(secret_name: str, secret_key: str, decode: bool = True) -> str:
+def get_secret(secret_name: str, secret_key: str) -> str:
     """
     Get secret value from Secrets Router.
     
     Args:
         secret_name: Name of the secret
         secret_key: Key within the secret
-        decode: If True, return decoded value; if False, return base64 encoded
     
     Returns:
-        Secret value as string
+        Secret value as decoded string, ready to use
     """
     url = f"{SECRETS_ROUTER_URL}/secrets/{secret_name}/{secret_key}"
-    params = {
-        "namespace": NAMESPACE,
-        "decode": "true" if decode else "false"
-    }
+    params = {"namespace": NAMESPACE}
     
     response = requests.get(url, params=params)
     response.raise_for_status()
@@ -101,10 +92,9 @@ type SecretResponse struct {
     SecretName string `json:"secret_name"`
     SecretKey  string `json:"secret_key"`
     Value      string `json:"value"`
-    Encoded    bool   `json:"encoded"`
 }
 
-func getSecret(secretRouterURL, namespace, secretName, secretKey string, decode bool) (string, error) {
+func getSecret(secretRouterURL, namespace, secretName, secretKey string) (string, error) {
     u, err := url.Parse(fmt.Sprintf("%s/secrets/%s/%s", secretRouterURL, secretName, secretKey))
     if err != nil {
         return "", err
@@ -112,9 +102,6 @@ func getSecret(secretRouterURL, namespace, secretName, secretKey string, decode 
     
     q := u.Query()
     q.Set("namespace", namespace)
-    if decode {
-        q.Set("decode", "true")
-    }
     u.RawQuery = q.Encode()
     
     resp, err := http.Get(u.String())
@@ -141,7 +128,6 @@ func main() {
         "production",
         "database-credentials",
         "password",
-        true, // decode
     )
     if err != nil {
         panic(err)
@@ -163,20 +149,17 @@ interface SecretResponse {
   secret_name: string;
   secret_key: string;
   value: string;
-  encoded: boolean;
 }
 
 async function getSecret(
   secretName: string,
-  secretKey: string,
-  decode: boolean = true
+  secretKey: string
 ): Promise<string> {
   const response = await axios.get<SecretResponse>(
     `${SECRETS_ROUTER_URL}/secrets/${secretName}/${secretKey}`,
     {
       params: {
         namespace: NAMESPACE,
-        decode: decode.toString(),
       },
     }
   );
@@ -271,16 +254,14 @@ def get_secret_safe(secret_name: str, secret_key: str, default: str = None) -> s
         raise
 ```
 
-### 4. Use Decoded Values
+### 4. Values Are Always Decoded
 
-Always use `decode=true` for readability, unless you specifically need base64 encoding:
+All secret values are automatically decoded and ready to use:
 
 ```python
-# Good - decoded value
-password = get_secret("database-credentials", "password", decode=True)
-
-# Only if you need base64
-encoded = get_secret("database-credentials", "password", decode=False)
+# Values are always decoded - ready to use immediately
+password = get_secret("database-credentials", "password")
+api_key = get_secret("api-keys", "external-service")
 ```
 
 ## Common Patterns
@@ -362,8 +343,8 @@ volumes:
 
 **After:**
 ```python
-# Use Secrets Router API
-password = get_secret("database-credentials", "password", namespace="production")
+# Use Secrets Router API - values are always decoded
+password = get_secret("database-credentials", "password")
 ```
 
 ## Support

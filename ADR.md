@@ -793,10 +793,10 @@ flowchart TD
 
 #### Phase 2: Secrets Router Service
 - Python3 FastAPI service with HTTP requests to Dapr sidecar
-- Auto-decoding of Kubernetes secrets
+- Auto-decoding of Kubernetes secrets (all values returned decoded)
 - Priority-based secret store resolution
 - Health check endpoints (`/healthz`, `/readyz`)
-- API endpoint: `GET /secrets/{name}/{key}?namespace={ns}&decode={bool}`
+- API endpoint: `GET /secrets/{name}/{key}?namespace={ns}`
 
 #### Phase 3: Dapr Components
 - Deploy Kubernetes Secrets component
@@ -855,8 +855,7 @@ GET  /readyz                               # Readiness check
 GET  /metrics                              # Prometheus metrics
 GET  /v1/secrets/{name}                    # Fetch secret by name (auto-resolves namespace)
 GET  /v1/secrets/{name}?namespace={ns}     # Fetch secret with explicit namespace override
-GET  /v1/secrets/{name}/{key}              # Fetch specific key from secret (namespace-scoped)
-GET  /v1/secrets/{name}/{key}?namespace={ns} # Fetch key with explicit namespace override
+GET  /v1/secrets/{name}/{key}?namespace={ns} # Fetch specific key from secret (always decoded)
 POST /v1/secrets/batch                     # Batch fetch multiple secrets
 ```
 
@@ -988,7 +987,6 @@ subjects:
 - `secret_key`: Key within the secret requested
 - `namespace`: Namespace where secret was stored (required parameter)
 - `backend`: Secret store that provided the secret (`kubernetes-secrets` or `aws-secrets-manager`)
-- `encoded`: Whether the returned value was base64 encoded
 
 ## Secret Scoping and Access Control
 

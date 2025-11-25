@@ -140,6 +140,7 @@ sequenceDiagram
 
 - Kubernetes Secrets are base64 encoded by default
 - Secrets Router **automatically decodes** K8s secrets before returning
+- All secrets returned as decoded values ready for use
 - Transparent to application developers
 - AWS Secrets Manager values are already decoded (no change needed)
 
@@ -168,7 +169,7 @@ sequenceDiagram
 - **Endpoints**:
   - `GET /healthz` - Health check
   - `GET /readyz` - Readiness check
-  - `GET /secrets/{secret_name}/{secret_key}?namespace={ns}&decode={bool}` - Get secret
+  - `GET /secrets/{secret_name}/{secret_key}?namespace={ns}` - Get secret (always decoded)
 
 ### Dapr Components
 
