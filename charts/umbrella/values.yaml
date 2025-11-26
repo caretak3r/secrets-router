@@ -1,9 +1,11 @@
-# Umbrella Chart Values for Secrets Broker
+# Control Plane Umbrella Chart Values
 # This chart installs Dapr control plane and Secrets Router service
-
-# Global namespace - all components will be installed in this namespace
-global:
-  namespace: default
+# 
+# Usage:
+#   helm install control-plane ./charts/umbrella -f override.yaml
+#
+# The override.yaml file can be used to customize secret store configurations
+# and other values for both the umbrella chart and child charts (dapr, secrets-router)
 
 # Dapr Control Plane Configuration
 dapr:
@@ -55,11 +57,16 @@ secrets-router:
     DAPR_HTTP_PORT: "3500"
     # Secret store priority: kubernetes-secrets first, then aws-secrets-manager
     SECRET_STORE_PRIORITY: "kubernetes-secrets,aws-secrets-manager"
-    # AWS Secrets Manager path prefix (if using AWS Secrets Manager)
-    # Secrets will be fetched from: {AWS_SECRETS_PATH_PREFIX}/{namespace}/{secret_name}
-    # Example: /app/secrets/production/database-credentials
-    AWS_SECRETS_PATH_PREFIX: "/app/secrets"
     SERVER_PORT: "8080"
+    # Service version
+    SERVICE_VERSION: "v0.0.1"
+  
+  # AWS Secrets Manager secret paths (optional)
+  # Configure full paths for AWS secrets here
+  # Example:
+  # awsSecretPaths:
+  #   database-credentials: "/app/secrets/production/database-credentials"
+  #   api-key: "/app/secrets/production/api-key"
   
   # ServiceAccount for AWS IRSA (if using AWS Secrets Manager)
   serviceAccount:
@@ -67,4 +74,35 @@ secrets-router:
     annotations: {}
       # Uncomment and configure if using AWS IRSA:
       # eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT:role/secrets-router-role
+  
+  # Secret Stores Configuration
+  # Configure Dapr secret store components
+  # These components define where secrets can be accessed from
+  secretStores:
+    enabled: true
+    stores:
+      # Kubernetes Secrets Store
+      # Configure which namespaces secrets can be accessed from
+      kubernetes-secrets:
+        type: secretstores.kubernetes
+        defaultSecretStore: true
+        # List of namespaces where Kubernetes secrets can be accessed
+        # Secrets Router will check these namespaces in order
+        # If not specified, defaults to Release.Namespace
+        namespaces:
+          # - production
+          # - staging
+          # - default
+      
+      # AWS Secrets Manager Store
+      aws-secrets-manager:
+        type: secretstores.aws.secretsmanager
+        defaultSecretStore: false
+        region: us-east-1
+        # Optional: Path prefix for all AWS secrets
+        # pathPrefix: "/app/secrets"
+        auth:
+          secretStore: kubernetes
+          # When using IRSA, auth is handled via ServiceAccount annotations
+          # No additional auth metadata needed
 

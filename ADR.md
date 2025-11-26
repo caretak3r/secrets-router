@@ -534,11 +534,14 @@ sequenceDiagram
 
 We have chosen Option 3 (Dapr-based architecture) as the implementation approach:
 
-- **Umbrella Chart**: Single Helm chart installs Dapr control plane and Secrets Router
-- **Namespace-Scoped**: All secrets are namespace-scoped (no cluster-wide secrets)
+- **Control Plane Umbrella Chart**: Single Helm chart (`control-plane-umbrella`) installs Dapr control plane and Secrets Router
+- **Chart Dependencies**: Secrets Router chart has dependency on Dapr chart
+- **Multi-Namespace Support**: Secrets can be accessed from multiple namespaces (configured via Helm values)
+- **Configurable Components**: Dapr Components generated from Helm values via `secrets-components.yaml` template
 - **Two Stores**: Kubernetes Secrets and AWS Secrets Manager
 - **Auto-Decoding**: Kubernetes secrets automatically decoded for developers
 - **Path-Based AWS**: AWS secrets use configurable path prefix
+- **Namespace from Release**: All resources use `{{ .Release.Namespace }}` (no hardcoded namespaces)
 
 ### Implementation: Dapr-Based Secrets Broker (Option 3)
 
@@ -546,21 +549,26 @@ We have chosen Option 3 (Dapr-based architecture) as the implementation approach
 
 #### Rationale
 
-1. **Umbrella Chart Deployment**: Single Helm chart installs Dapr control plane and Secrets Router, simplifying customer deployment
-2. **Namespace-Scoped Architecture**: All secrets are namespace-scoped, providing isolation and simplicity
-3. **Developer Experience**: Simple HTTP API with automatic base64 decoding for Kubernetes secrets
-4. **Two Store Support**: Kubernetes Secrets (primary) and AWS Secrets Manager (fallback)
-5. **Path-Based AWS Configuration**: Configurable path prefix for AWS secrets organization
-6. **mTLS**: Automatic mTLS via Dapr Sentry without custom implementation
-7. **Observability**: Built-in metrics and logging via Dapr
-8. **Standardized Components**: Uses Dapr's standard secret store components
+1. **Control Plane Umbrella Chart**: Single Helm chart (`control-plane-umbrella`) installs Dapr control plane and Secrets Router, simplifying customer deployment
+2. **Chart Dependencies**: Secrets Router chart declares dependency on Dapr, ensuring proper installation order
+3. **Configurable Secret Stores**: Developers configure secret locations via `override.yaml` - no code changes needed
+4. **Multi-Namespace Support**: Secrets can be accessed from multiple namespaces, configured via Helm values
+5. **Template-Based Components**: Dapr Components generated from `secrets-components.yaml` template based on Helm values
+6. **Developer Experience**: Simple HTTP API with automatic base64 decoding for Kubernetes secrets
+7. **Two Store Support**: Kubernetes Secrets (primary) and AWS Secrets Manager (fallback)
+8. **Path-Based AWS Configuration**: Configurable path prefix for AWS secrets organization
+9. **mTLS**: Automatic mTLS via Dapr Sentry without custom implementation
+10. **Observability**: Built-in metrics and logging via Dapr
+11. **Standardized Components**: Uses Dapr's standard secret store components
+12. **Namespace Flexibility**: All resources use `{{ .Release.Namespace }}` - no hardcoded namespaces
 
 #### Architecture Benefits
 
 **Simplicity**:
-- Single umbrella chart for deployment
-- Namespace-scoped secrets (no cluster-wide complexity)
+- Single umbrella chart (`control-plane-umbrella`) for deployment
+- Configurable secret stores via `override.yaml`
 - Auto-decoding hides complexity from developers
+- Update `override.yaml` to add new secret locations - no code changes
 
 **Security**:
 - mTLS via Dapr Sentry
@@ -570,8 +578,10 @@ We have chosen Option 3 (Dapr-based architecture) as the implementation approach
 
 **Flexibility**:
 - Supports both Kubernetes Secrets and AWS Secrets Manager
+- Secrets can be accessed from multiple namespaces (configured in `override.yaml`)
 - Configurable path prefix for AWS secrets
 - Priority-based resolution (K8s first, then AWS)
+- Easy to add new namespaces or secret stores via Helm values
 
 **Developer Experience**:
 - Simple HTTP API: `GET /secrets/{name}/{key}?namespace={ns}`
@@ -785,10 +795,12 @@ flowchart TD
 
 **Goal**: Deploy Dapr-based secrets broker with umbrella chart
 
-#### Phase 1: Umbrella Chart Development
-- Create umbrella chart with Dapr and Secrets Router dependencies
-- Configure namespace-scoped deployment
+#### Phase 1: Control Plane Umbrella Chart Development
+- Create `control-plane-umbrella` chart with Dapr and Secrets Router dependencies
+- Secrets Router chart declares dependency on Dapr
+- Configure deployment using `{{ .Release.Namespace }}` (no hardcoded namespaces)
 - Set up environment variable configuration
+- Create `secrets-components.yaml` template for generating Dapr Components
 - Test chart installation
 
 #### Phase 2: Secrets Router Service
@@ -799,10 +811,13 @@ flowchart TD
 - API endpoint: `GET /secrets/{name}/{key}?namespace={ns}`
 
 #### Phase 3: Dapr Components
-- Deploy Kubernetes Secrets component
-- Deploy AWS Secrets Manager component (if configured)
+- Create `secrets-components.yaml` template in Secrets Router chart
+- Generate Kubernetes Secrets component from Helm values
+- Generate AWS Secrets Manager component (if configured)
+- Support multiple namespaces in Kubernetes Secrets component
 - Configure path-based AWS secrets
 - Test component integration
+- Ensure components use `{{ .Release.Namespace }}` for namespace
 
 #### Phase 4: Production Hardening
 - Distroless container image optimization
@@ -819,11 +834,13 @@ flowchart TD
 - Air-gapped environment validation
 
 **Deliverables**:
-- Production-ready umbrella Helm chart
+- Production-ready `control-plane-umbrella` Helm chart
+- Secrets Router chart with Dapr dependency
+- `secrets-components.yaml` template for generating Dapr Components
 - Secrets Router service with auto-decoding
-- Dapr component definitions
+- Configurable secret store definitions (via Helm values)
 - Comprehensive documentation
-- Developer guide with examples
+- Developer guide with examples and `override.yaml` configuration
 
 ## Technical Specifications
 
@@ -878,18 +895,15 @@ POST /v1/secrets/batch                     # Batch fetch multiple secrets
    - Examples: shared database credentials, cluster certificates, license keys
 
 4. **AWS Secrets Manager Path Structure**:
-   - Namespace-scoped: `/app/secrets/{namespace}/{secret-name}`
-   - Cluster-wide: `/app/secrets/cluster/{secret-name}` or `/app/secrets/shared/{secret-name}`
+   - Full paths configured in Helm chart values
+   - Secret names can be simple names (mapped via Helm config) or full paths
+   - Example: `database-credentials: "/app/secrets/production/database-credentials"` in Helm values
 
 ### Environment Variables
 
 ```bash
 # Backend Configuration
-SECRETS_BACKEND=k8s,aws-secrets-manager
-K8S_CLUSTER_WIDE_NAMESPACE=kube-system  # Namespace for cluster-wide secrets
-AWS_REGION=us-east-1
-AWS_SECRETS_MANAGER_PREFIX=/app/secrets
-AWS_CLUSTER_SECRETS_PREFIX=/app/secrets/cluster  # Prefix for cluster-wide secrets in AWS
+SECRET_STORE_PRIORITY=kubernetes-secrets,aws-secrets-manager
 
 # Security
 MTLS_ENABLED=true

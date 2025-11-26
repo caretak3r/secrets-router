@@ -2,10 +2,23 @@
 
 ## Overview
 
-The Secrets Broker is deployed as an **umbrella Helm chart** that includes:
-- **Dapr Control Plane**: Provides mTLS and component abstraction
-- **Secrets Router Service**: HTTP API service that routes secret requests to Dapr components
-- **Dapr Components**: Kubernetes Secrets and AWS Secrets Manager integrations
+The Secrets Broker is deployed as a **control-plane-umbrella Helm chart** that includes:
+- **Dapr Control Plane**: Provides mTLS and component abstraction (installed as a dependency)
+- **Secrets Router Service**: HTTP API service that routes secret requests to Dapr components (installed as a dependency)
+- **Dapr Components**: Configurable secret store components (Kubernetes Secrets and AWS Secrets Manager) generated from Helm values
+
+## Chart Structure
+
+```
+control-plane-umbrella (umbrella chart)
+├── dapr (dependency)
+│   └── Dapr control plane components
+└── secrets-router (dependency)
+    ├── secrets-router service deployment
+    └── secrets-components.yaml (generates Dapr Component resources)
+```
+
+The `secrets-router` chart has its own dependency on `dapr`, ensuring Dapr is available when secrets-router is deployed.
 
 ## Architecture Diagram
 
@@ -131,10 +144,12 @@ sequenceDiagram
 
 ### 2. Umbrella Chart Deployment
 
-- Customer installs a single umbrella chart
+- Customer installs `control-plane-umbrella` chart
 - Chart includes Dapr control plane and Secrets Router as dependencies
-- All components deployed to customer's namespace
+- Secrets Router chart has its own dependency on Dapr
+- All components deployed to customer's namespace (determined by `{{ .Release.Namespace }}`)
 - Simplified deployment and management
+- Users provide `override.yaml` to configure secret store locations
 
 ### 3. Auto-Decoding of Kubernetes Secrets
 
@@ -144,12 +159,12 @@ sequenceDiagram
 - Transparent to application developers
 - AWS Secrets Manager values are already decoded (no change needed)
 
-### 4. Path-Based AWS Secrets Manager
+### 4. AWS Secrets Manager Configuration
 
-- AWS secrets use path-based naming: `{prefix}/{namespace}/{secret-name}`
-- Path prefix configurable via Helm values (default: `/app/secrets`)
-- Example: `/app/secrets/production/database-credentials`
-- Allows organization of secrets by namespace/environment
+- AWS secrets can use full paths configured in Helm chart values
+- Secret names can be simple names (mapped to paths via Helm config) or full paths
+- Example: Configure `database-credentials: "/app/secrets/production/database-credentials"` in Helm values
+- Allows flexible secret path management
 
 ### 5. Priority-Based Resolution
 
@@ -180,7 +195,7 @@ sequenceDiagram
 
 #### AWS Secrets Manager Component
 - **Type**: `secretstores.aws.secretsmanager`
-- **Format**: `{path-prefix}/{namespace}/{secret-name}`
+- **Format**: Full path (configured in Helm values) or simple name
 - **Auto-decoding**: No (already decoded)
 
 ## Deployment Model
@@ -222,33 +237,105 @@ graph LR
 
 ### Umbrella Chart Values
 
+Users install the umbrella chart with an `override.yaml` file:
+
 ```yaml
-global:
-  namespace: production  # Customer's namespace
-
-dapr:
-  enabled: true
-
+# override.yaml
 secrets-router:
   enabled: true
   env:
     SECRET_STORE_PRIORITY: "kubernetes-secrets,aws-secrets-manager"
-    AWS_SECRETS_PATH_PREFIX: "/app/secrets"
-  awsSecretsPathPrefix: "/app/secrets"
+  
+  # Configure secret stores - where secrets can be accessed from
+  secretStores:
+    enabled: true
+    stores:
+      kubernetes-secrets:
+        type: secretstores.kubernetes
+        defaultSecretStore: true
+        # List namespaces where Kubernetes secrets can be accessed
+        namespaces:
+          - production
+          - staging
+          - shared-services
+      
+      aws-secrets-manager:
+        type: secretstores.aws.secretsmanager
+        defaultSecretStore: false
+        region: us-east-1
+        pathPrefix: "/app/secrets"
+        auth:
+          secretStore: kubernetes
 ```
 
 ### Dapr Components
 
-Deployed automatically with umbrella chart:
-- `kubernetes-secrets` component
+Dapr Components are **generated automatically** from Helm values via `secrets-components.yaml` template:
+- Components are created in the release namespace (`{{ .Release.Namespace }}`)
+- `kubernetes-secrets` component configured with allowed namespaces
 - `aws-secrets-manager` component (if AWS configured)
+- Developers update `override.yaml` to add new namespaces or secret stores
+
+## Developer Workflow
+
+### Creating Secrets
+
+1. **Developer creates secrets** in their namespace (or any namespace):
+   ```bash
+   kubectl create secret generic my-secret \
+     --from-literal=password=secret123 \
+     -n production
+   ```
+
+2. **Developer updates `override.yaml`** to include the namespace:
+   ```yaml
+   secrets-router:
+     secretStores:
+       stores:
+         kubernetes-secrets:
+           namespaces:
+             - production  # Add this namespace
+             - staging
+   ```
+
+3. **Upgrade the helm release**:
+   ```bash
+   helm upgrade control-plane ./charts/umbrella -f override.yaml
+   ```
+
+4. **Application accesses secret** via Secrets Router API:
+   ```bash
+   curl http://secrets-router:8080/secrets/my-secret/password?namespace=production
+   ```
+
+### Individual Service Helm Charts
+
+Service helm charts that are part of the control-plane-umbrella can:
+
+1. **Reference secrets-router service** by name:
+   ```yaml
+   # In service deployment
+   env:
+     - name: DB_PASSWORD
+       valueFrom:
+         httpGet:
+           path: /secrets/database-credentials/password?namespace={{ .Release.Namespace }}
+           port: 8080
+           host: secrets-router
+   ```
+
+2. **Or use HTTP client libraries** to fetch secrets at runtime (recommended)
+
+3. **Ensure namespace is configured** in `override.yaml` if secrets are in different namespaces
 
 ## Benefits
 
 1. **Simple Deployment**: Single umbrella chart installs everything
-2. **Namespace Isolation**: Secrets scoped to namespace
-3. **Developer Friendly**: Simple HTTP API, auto-decoding
-4. **Flexible**: Supports both K8s and AWS secrets
-5. **Secure**: mTLS, RBAC, audit logging
-6. **Transparent**: Auto-decoding hides complexity from developers
+2. **Flexible Configuration**: Developers configure secret locations via `override.yaml`
+3. **Namespace Support**: Secrets can be accessed from multiple namespaces
+4. **Developer Friendly**: Simple HTTP API, auto-decoding
+5. **Flexible**: Supports both K8s and AWS secrets
+6. **Secure**: mTLS, RBAC, audit logging
+7. **Transparent**: Auto-decoding hides complexity from developers
+8. **Streamlined**: Update `override.yaml` to add new secret locations, no code changes needed
 

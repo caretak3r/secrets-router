@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "secrets-router.fullname" . }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "secrets-router.labels" . | nindent 4 }}
     app.kubernetes.io/component: secrets-router
@@ -27,6 +28,8 @@ spec:
         {{- if .Values.dapr.tracing.enabled }}
         dapr.io/enable-tracing: "true"
         {{- end }}
+        # Dapr component scoping - allow access to components in same namespace
+        dapr.io/component-scope: "{{ .Release.Namespace }}"
       labels:
         {{- include "secrets-router.selectorLabels" . | nindent 8 }}
     spec:

@@ -3,6 +3,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: {{ include "secrets-router.fullname" . }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "secrets-router.labels" . | nindent 4 }}
 rules:
@@ -14,6 +15,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: {{ include "secrets-router.fullname" . }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "secrets-router.labels" . | nindent 4 }}
 roleRef:

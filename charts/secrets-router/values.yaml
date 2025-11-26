@@ -45,11 +45,16 @@ env:
   # Secrets will be fetched from stores in order until found
   # Default: kubernetes-secrets first, then aws-secrets-manager
   SECRET_STORE_PRIORITY: "kubernetes-secrets,aws-secrets-manager"
-  # AWS Secrets Manager path prefix for path-based secrets
-  # Format: {AWS_SECRETS_PATH_PREFIX}/{namespace}/{secret_name}
-  # Example: /app/secrets/production/database-credentials
-  AWS_SECRETS_PATH_PREFIX: "/app/secrets"
   SERVER_PORT: "8080"
+  # Service version
+  SERVICE_VERSION: "v0.0.1"
+  
+  # AWS Secrets Manager secret paths (optional)
+  # Configure full paths for AWS secrets in this section
+  # Example:
+  # AWS_SECRET_PATHS:
+  #   database-credentials: "/app/secrets/production/database-credentials"
+  #   api-key: "/app/secrets/production/api-key"
 
 # ServiceAccount configuration
 serviceAccount:
@@ -93,4 +98,39 @@ networkPolicy:
 # Ingress (optional)
 ingress:
   enabled: false
+
+# Secret Stores Configuration
+# Configure Dapr secret store components that will be created
+secretStores:
+  enabled: true
+  stores:
+    # Kubernetes Secrets Store
+    # Supports secrets from multiple namespaces
+    kubernetes-secrets:
+      type: secretstores.kubernetes
+      defaultSecretStore: true
+      # List of namespaces where secrets can be accessed
+      # If not specified, defaults to Release.Namespace
+      namespaces:
+        # - production
+        # - staging
+        # - default
+    
+    # AWS Secrets Manager Store
+    aws-secrets-manager:
+      type: secretstores.aws.secretsmanager
+      defaultSecretStore: false
+      region: us-east-1
+      # Optional: Path prefix for all AWS secrets
+      # pathPrefix: "/app/secrets"
+      # Optional: Map of secret names to full AWS paths
+      # secretPaths:
+      #   database-credentials: "/app/secrets/production/database-credentials"
+      #   api-key: "/app/secrets/production/api-key"
+      auth:
+        secretStore: kubernetes
+        # Optional: Additional auth metadata
+        # metadata:
+        #   accessKey: "AWS_ACCESS_KEY_ID"
+        #   secretKey: "AWS_SECRET_ACCESS_KEY"
 

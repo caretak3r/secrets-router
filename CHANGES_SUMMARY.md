@@ -1,170 +1,263 @@
-# Changes Summary
+# Changes Summary: Secrets Router Helm Chart Architecture Update
 
-This document summarizes all changes made to reflect the updated architecture requirements.
+## Overview
 
-## Architecture Changes
+Updated the Secrets Router architecture to support:
+1. Umbrella chart structure (`control-plane-umbrella`)
+2. Secrets Router chart dependency on Dapr
+3. Configurable Dapr Components generated from Helm values
+4. Multi-namespace secret access support
+5. Namespace determined from `{{ .Release.Namespace }}` (no hardcoded namespaces)
 
-### 1. Umbrella Chart Deployment ✅
+## Key Changes
 
-- **Created**: `charts/umbrella/Chart.yaml` - Umbrella chart with Dapr and Secrets Router dependencies
-- **Created**: `charts/umbrella/values.yaml` - Configuration values for umbrella chart
-- **Created**: `charts/umbrella/README.md` - Umbrella chart documentation
-- **Created**: `charts/umbrella/templates/_helpers.tpl` - Helm template helpers
+### 1. Chart Structure Updates
 
-**Impact**: Customers install a single umbrella chart that includes both Dapr control plane and Secrets Router service.
+#### Umbrella Chart (`charts/umbrella/Chart.yaml`)
+- **Renamed**: `secrets-broker` → `control-plane-umbrella`
+- **Dependencies**: Dapr and Secrets Router remain as dependencies
 
-### 2. Namespace-Scoped Architecture ✅
+#### Secrets Router Chart (`charts/secrets-router/Chart.yaml`)
+- **Added**: Dependency on Dapr chart
+- Ensures Dapr is installed before Secrets Router
 
-- **Updated**: `secrets-router/main.py` - Removed cluster-wide secret logic
-- **Updated**: `ADR.md` - Removed references to cluster-wide secrets
-- **Updated**: API endpoint - `namespace` parameter is now **required**
+### 2. New Template: `secrets-components.yaml`
 
-**Changes**:
-- All secrets are namespace-scoped
-- No cluster-wide secrets concept
-- Namespace must be provided in API requests
-- Secrets stored in customer's deployment namespace
+**Location**: `charts/secrets-router/templates/secrets-components.yaml`
 
-### 3. Auto-Decoding of Kubernetes Secrets ✅
+**Purpose**: Generates Dapr Component resources based on Helm values
 
-- **Updated**: `secrets-router/main.py` - Added automatic base64 decoding for K8s secrets
-- **Behavior**: Kubernetes secrets are automatically decoded before returning to caller
-- **Transparent**: Developers receive decoded values without needing to decode themselves
+**Features**:
+- Supports multiple secret store types (Kubernetes, AWS Secrets Manager)
+- Configurable namespaces for Kubernetes secrets
+- Generates components in `{{ .Release.Namespace }}`
+- Configurable via `secretStores.stores` in values.yaml
 
-**Code Change**:
-```python
-# Auto-decode K8s secrets (they come base64 encoded from K8s API)
-if "kubernetes" in store_lower:
-    decoded_value = base64.b64decode(value).decode('utf-8')
-    value = decoded_value
+**Example Generated Component**:
+```yaml
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: kubernetes-secrets
+  namespace: <Release.Namespace>
+spec:
+  type: secretstores.kubernetes
+  version: v1
+  metadata:
+  - name: allowedNamespaces
+    value: "production,staging,shared-services"
+  - name: defaultSecretStore
+    value: "true"
 ```
 
-### 4. Path-Based AWS Secrets Manager ✅
+### 3. Values Configuration Updates
 
-- **Added**: `AWS_SECRETS_PATH_PREFIX` environment variable
-- **Updated**: `charts/secrets-router/values.yaml` - Added AWS path prefix configuration
-- **Updated**: `charts/umbrella/values.yaml` - Added AWS path prefix configuration
-- **Format**: `{AWS_SECRETS_PATH_PREFIX}/{namespace}/{secret-name}`
+#### `charts/secrets-router/values.yaml`
+**Added**: `secretStores` section:
+```yaml
+secretStores:
+  enabled: true
+  stores:
+    kubernetes-secrets:
+      type: secretstores.kubernetes
+      defaultSecretStore: true
+      namespaces:
+        - production
+        - staging
+    aws-secrets-manager:
+      type: secretstores.aws.secretsmanager
+      defaultSecretStore: false
+      region: us-east-1
+      pathPrefix: "/app/secrets"
+      auth:
+        secretStore: kubernetes
+```
 
-**Example**: `/app/secrets/production/database-credentials`
+#### `charts/umbrella/values.yaml`
+**Updated**: Added `secretStores` configuration under `secrets-router` section
 
-### 5. Developer Documentation ✅
+### 4. Template Updates: Namespace Usage
 
-- **Created**: `DEVELOPER_GUIDE.md` - Comprehensive developer-focused guide
-- **Created**: `QUICKSTART.md` - Quick start guide
-- **Updated**: `README.md` - Updated main README with new architecture
+All templates now use `{{ .Release.Namespace }}` instead of hardcoded namespaces:
+
+- ✅ `deployment.yaml` - Added `namespace: {{ .Release.Namespace }}`
+- ✅ `service.yaml` - Added `namespace: {{ .Release.Namespace }}`
+- ✅ `serviceaccount.yaml` - Added `namespace: {{ .Release.Namespace }}`
+- ✅ `rbac.yaml` - Added `namespace: {{ .Release.Namespace }}` to Role and RoleBinding
+- ✅ `secrets-components.yaml` - Uses `{{ $.Release.Namespace }}` for Component namespace
+
+### 5. Dapr Annotations Updates
+
+#### `charts/secrets-router/templates/deployment.yaml`
+**Added**: Dapr component scoping annotation:
+```yaml
+annotations:
+  dapr.io/component-scope: "{{ .Release.Namespace }}"
+```
+
+This ensures Dapr components are scoped to the release namespace.
+
+### 6. Documentation Updates
+
+#### `ARCHITECTURE.md`
+- Updated to reflect `control-plane-umbrella` chart name
+- Added explanation of chart dependencies
+- Added developer workflow section
+- Updated configuration examples
+
+#### `ADR.md`
+- Updated rationale section with new architecture details
+- Updated implementation plan phases
+- Added notes about configurable components and multi-namespace support
+
+#### `DEVELOPER_GUIDE.md`
+- Added "Configuring Secret Stores" section
+- Updated secret storage locations explanation
+- Added troubleshooting for namespace configuration
+- Added integration examples for service helm charts
+
+#### `secrets-router/main.py`
+- Updated docstrings to explain namespace parameter
+- Added architecture context comments
+- Clarified how namespace validation works with Dapr components
+
+### 7. New Documentation Files
+
+#### `SECRETS_ROUTER_INTEGRATION.md`
+**Purpose**: Comprehensive guide for integrating Secrets Router with service helm charts
 
 **Contents**:
-- API usage examples (Python, Go, Node.js)
-- Code snippets and patterns
-- Best practices
+- Architecture overview
+- Developer workflow (4 steps)
+- Integration options for service charts
+- Example service chart integration
 - Troubleshooting guide
 
-### 6. Removed Secrets Router Component ✅
+## Developer Workflow
 
-- **Deleted**: `dapr-components/secrets-router-component.yaml`
-- **Reason**: Secrets Router service doesn't need its own Dapr component - it queries other components directly
+### Before (Old Way)
+1. Create secrets in namespace
+2. Hardcode namespace in component files
+3. Manually create/update Dapr Component resources
+4. Redeploy components
 
-### 7. Updated Diagrams ✅
+### After (New Way)
+1. Create secrets in any namespace
+2. Update `override.yaml` to add namespace to `secretStores.stores.kubernetes-secrets.namespaces`
+3. Run `helm upgrade control-plane ./charts/umbrella -f override.yaml`
+4. Components are automatically generated/updated
 
-- **Updated**: `ARCHITECTURE.md` - New architecture diagrams
-- **Updated**: `DAPR_INTEGRATION.md` - Updated sequence diagrams
-- **Updated**: `ADR.md` - Updated flow diagrams
+## Benefits
 
-**Key Changes**:
-- Removed cluster-wide secret references
-- Added namespace-scoped flow
-- Added auto-decoding step
-- Updated AWS path format
+1. **Streamlined Configuration**: Update `override.yaml` instead of editing component files
+2. **No Code Changes**: Adding new namespaces doesn't require code changes
+3. **Multi-Namespace Support**: Access secrets from multiple namespaces
+4. **Namespace Flexibility**: All resources use `{{ .Release.Namespace }}`
+5. **Template-Based**: Components generated from Helm values
+6. **Developer Friendly**: Simple workflow for adding new secret locations
 
-### 8. Updated ADR ✅
-
-- **Updated**: Decision outcome section - Changed to Option 3 (Dapr-based)
-- **Updated**: Secret scoping section - Removed cluster-wide secrets
-- **Updated**: API endpoints section - Simplified to single endpoint
-- **Updated**: Environment variables section - Removed cluster-wide config
-- **Updated**: RBAC section - Changed to namespace-scoped Role/RoleBinding
-
-## Code Changes
-
-### secrets-router/main.py
-
-1. **Auto-decoding**: Added automatic base64 decoding for K8s secrets
-2. **Namespace required**: Made namespace parameter required
-3. **Path-based AWS**: Added AWS_SECRETS_PATH_PREFIX support
-4. **Error handling**: Improved error messages for missing namespace
-
-### Helm Charts
-
-1. **Umbrella chart**: New chart with dependencies
-2. **Environment variables**: Added AWS_SECRETS_PATH_PREFIX
-3. **Namespace injection**: Added NAMESPACE environment variable from pod metadata
-
-## Documentation Changes
-
-### New Files
-
-- `DEVELOPER_GUIDE.md` - Developer-focused usage guide
-- `QUICKSTART.md` - Quick start guide
-- `ARCHITECTURE.md` - Architecture diagrams and details
-- `CHANGES_SUMMARY.md` - This file
-
-### Updated Files
-
-- `README.md` - Updated with new architecture
-- `ADR.md` - Updated to reflect namespace-scoped architecture
-- `DAPR_INTEGRATION.md` - Updated diagrams and flow
-- `charts/umbrella/README.md` - Umbrella chart documentation
-
-## Migration Notes
+## Migration Guide
 
 ### For Existing Deployments
 
-If you have an existing deployment:
+1. **Update Chart Name**:
+   ```bash
+   # Old
+   helm install secrets-broker ./charts/umbrella
+   
+   # New
+   helm install control-plane ./charts/umbrella
+   ```
 
-1. **Update API calls**: Add `namespace` parameter (now required)
-2. **Remove cluster-wide secrets**: Move to namespace-scoped
-3. **Update AWS paths**: Use new path format: `{prefix}/{namespace}/{secret-name}`
-4. **Redeploy**: Use new umbrella chart
+2. **Create override.yaml**:
+   ```yaml
+   secrets-router:
+     secretStores:
+       enabled: true
+       stores:
+         kubernetes-secrets:
+           namespaces:
+             - <your-namespace>
+   ```
 
-### API Changes
+3. **Upgrade Release**:
+   ```bash
+   helm upgrade control-plane ./charts/umbrella -f override.yaml
+   ```
 
-**Before**:
-```
-GET /v1/secrets/{name}?namespace={ns}  # namespace optional
-```
+### For New Deployments
 
-**After**:
-```
-GET /secrets/{name}/{key}?namespace={ns}  # namespace required
-```
+1. **Install Umbrella Chart**:
+   ```bash
+   helm install control-plane ./charts/umbrella -f override.yaml
+   ```
 
-## Testing Checklist
+2. **Configure Secret Stores** in `override.yaml`:
+   ```yaml
+   secrets-router:
+     secretStores:
+       stores:
+         kubernetes-secrets:
+           namespaces:
+             - production
+             - staging
+   ```
 
-- [ ] Umbrella chart installs successfully
-- [ ] Dapr control plane deployed
-- [ ] Secrets Router service deployed
-- [ ] Dapr components deployed
-- [ ] Kubernetes secrets can be fetched
-- [ ] AWS secrets can be fetched (if configured)
-- [ ] Auto-decoding works for K8s secrets
-- [ ] Namespace parameter validation works
-- [ ] Priority resolution works (K8s → AWS)
-- [ ] Health checks work
-- [ ] Developer examples work
+3. **Create Secrets** in configured namespaces
 
-## Breaking Changes
+4. **Use Secrets** in applications via HTTP API
 
-1. **API Endpoint Changed**: `/v1/secrets/{name}` → `/secrets/{name}/{key}`
-2. **Namespace Required**: No longer optional
-3. **No Cluster-Wide Secrets**: All secrets must be namespace-scoped
-4. **Component Removed**: secrets-router-component.yaml no longer needed
+## Files Changed
+
+### Charts
+- `charts/umbrella/Chart.yaml` - Renamed to control-plane-umbrella
+- `charts/umbrella/values.yaml` - Added secretStores configuration
+- `charts/secrets-router/Chart.yaml` - Added Dapr dependency
+- `charts/secrets-router/values.yaml` - Added secretStores section
+- `charts/secrets-router/templates/deployment.yaml` - Added namespace, Dapr annotations
+- `charts/secrets-router/templates/service.yaml` - Added namespace
+- `charts/secrets-router/templates/serviceaccount.yaml` - Added namespace
+- `charts/secrets-router/templates/rbac.yaml` - Added namespaces to Role/RoleBinding
+- `charts/secrets-router/templates/secrets-components.yaml` - **NEW** - Generates Dapr Components
+
+### Documentation
+- `ARCHITECTURE.md` - Updated architecture details
+- `ADR.md` - Updated decision rationale and implementation plan
+- `DEVELOPER_GUIDE.md` - Added configuration and integration guides
+- `secrets-router/main.py` - Updated docstrings and comments
+- `SECRETS_ROUTER_INTEGRATION.md` - **NEW** - Integration guide
+- `CHANGES_SUMMARY.md` - **NEW** - This file
+
+## Testing
+
+To test the new architecture:
+
+1. **Template Test**:
+   ```bash
+   helm template test ./charts/secrets-router -f test-values.yaml
+   ```
+
+2. **Verify Components Generated**:
+   ```bash
+   helm template test ./charts/secrets-router -f test-values.yaml | grep -A 20 "kind: Component"
+   ```
+
+3. **Check Namespace Usage**:
+   ```bash
+   helm template test ./charts/secrets-router -f test-values.yaml | grep "namespace:"
+   ```
 
 ## Next Steps
 
-1. Test umbrella chart installation
-2. Verify Dapr component integration
-3. Test secret retrieval from both stores
-4. Validate auto-decoding behavior
-5. Update application code to use new API
+1. Test helm chart installation with new structure
+2. Verify Dapr Components are created correctly
+3. Test multi-namespace secret access
+4. Update CI/CD pipelines if needed
+5. Update any existing deployment scripts
 
+## Questions?
+
+See:
+- `SECRETS_ROUTER_INTEGRATION.md` for integration examples
+- `DEVELOPER_GUIDE.md` for usage examples
+- `ARCHITECTURE.md` for architecture details

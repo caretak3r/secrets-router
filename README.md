@@ -154,7 +154,9 @@ global:
 secrets-router:
   env:
     SECRET_STORE_PRIORITY: "kubernetes-secrets,aws-secrets-manager"
-    AWS_SECRETS_PATH_PREFIX: "/app/secrets"  # Path prefix for AWS secrets
+  # Optional: Configure AWS secret paths
+  # awsSecretPaths:
+  #   database-credentials: "/app/secrets/production/database-credentials"
 ```
 
 ### AWS IRSA Configuration
@@ -179,8 +181,8 @@ secrets-router:
 ### AWS Secrets Manager
 
 - **Location**: AWS Secrets Manager
-- **Format**: `{AWS_SECRETS_PATH_PREFIX}/{namespace}/{secret-name}`
-- **Example**: `/app/secrets/production/database-credentials`
+- **Format**: Full paths configured in Helm chart values, or simple names
+- **Configuration**: Secret paths configured in `values.yaml` (e.g., `database-credentials: "/app/secrets/production/database-credentials"`)
 - **Auto-decoding**: No (already decoded)
 
 ## Examples

@@ -2,6 +2,13 @@
 """
 Secrets Router Service - Dapr-based secrets broker
 Fetches secrets from Dapr components via HTTP requests to sidecar
+
+Architecture:
+- Deployed as part of control-plane-umbrella Helm chart
+- Dapr Components are generated from secrets-components.yaml template
+- Supports secrets from multiple namespaces (configured via Helm values)
+- Namespace is determined from Release.Namespace in Helm templates
+- Applications specify namespace as query parameter in API calls
 """
 
 import os
@@ -14,7 +21,7 @@ import httpx
 from fastapi import FastAPI, HTTPException, Query
 from rich.logging import RichHandler
 
-# Configure logging
+# Configure logging first
 logging.basicConfig(
     level=logging.INFO,
     format="%(message)s",
@@ -31,8 +38,8 @@ SECRET_STORE_PRIORITY = os.getenv(
     "SECRET_STORE_PRIORITY",
     "kubernetes-secrets,aws-secrets-manager"
 ).split(",")
-AWS_SECRETS_PATH_PREFIX = os.getenv("AWS_SECRETS_PATH_PREFIX", "/app/secrets")
 SERVER_PORT = int(os.getenv("SERVER_PORT", "8080"))
+SERVICE_VERSION = os.getenv("SERVICE_VERSION", "v0.0.1")
 
 if DEBUG_MODE:
     logging.getLogger().setLevel(logging.DEBUG)
@@ -42,6 +49,7 @@ dapr_client = httpx.AsyncClient(base_url=DAPR_HTTP_ENDPOINT, timeout=30.0)
 
 logger.info(f"Dapr endpoint: {DAPR_HTTP_ENDPOINT}")
 logger.info(f"Secret store priority: {SECRET_STORE_PRIORITY}")
+logger.info(f"Service version: {SERVICE_VERSION}")
 
 
 class SecretsRouter:
@@ -132,18 +140,24 @@ class SecretsRouter:
         Build the secret key for Dapr component API.
         
         Kubernetes: namespace/secret-name
-        AWS: {prefix}/{namespace}/{secret-name}
+        - The Dapr kubernetes-secrets component is configured with allowedNamespaces
+        - We pass namespace/secret-name format to Dapr
+        - Dapr component checks if namespace is in allowedNamespaces list
+        
+        AWS: secret_name as-is (can be full path or simple name)
+        - Path prefix configured in Helm values (pathPrefix metadata)
+        - Full paths can be configured in secretPaths mapping
         """
         store_lower = store_name.lower()
         
         if "kubernetes" in store_lower:
+            # Always use namespace/secret-name format
+            # Dapr component will validate namespace against allowedNamespaces
             return f"{namespace}/{secret_name}"
         
-        if "aws" in store_lower or "secretsmanager" in store_lower:
-            return f"{AWS_SECRETS_PATH_PREFIX}/{namespace}/{secret_name}"
-        
-        # Default format
-        return f"{namespace}/{secret_name}"
+        # For AWS, use secret_name as-is (can be full path configured in helm values)
+        # Path prefix is handled by Dapr component metadata (pathPrefix)
+        return secret_name
 
 
 @asynccontextmanager
@@ -158,7 +172,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Secrets Router",
     description="Dapr-based secrets broker",
-    version="1.0.0",
+    version=SERVICE_VERSION,
     lifespan=lifespan
 )
 
@@ -174,7 +188,7 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "secrets-router",
-        "version": "1.0.0"
+        "version": SERVICE_VERSION
     }
 
 
@@ -188,7 +202,7 @@ async def readiness_check():
     try:
         # Check if Dapr sidecar is reachable
         # Try to connect to Dapr sidecar health endpoint
-        health_url = f"{DAPR_HTTP_ENDPOINT}/v1.0/healthz"
+        health_url = f"{DAPR_HTTP_ENDPOINT}/healthz"
         async with httpx.AsyncClient(timeout=2.0) as client:
             response = await client.get(health_url)
             if response.status_code == 200:
@@ -196,7 +210,7 @@ async def readiness_check():
                     "status": "ready",
                     "service": "secrets-router",
                     "dapr_sidecar": "connected",
-                    "version": "1.0.0"
+                    "version": SERVICE_VERSION
                 }
             else:
                 # Dapr sidecar not healthy
@@ -241,7 +255,7 @@ async def readiness_check():
 async def get_secret(
     secret_name: str,
     secret_key: str,
-    namespace: str = Query(..., description="Kubernetes namespace (required)")
+    namespace: str = Query(..., description="Kubernetes namespace where secret exists (required)")
 ):
     """
     Get secret value from Dapr secret stores.
@@ -249,16 +263,25 @@ async def get_secret(
     Tries stores in priority order (K8s → AWS by default).
     Returns decoded values ready for application use.
     
+    The namespace parameter specifies which Kubernetes namespace to check for the secret.
+    The Dapr kubernetes-secrets component must be configured with this namespace in its
+    allowedNamespaces list (configured via Helm values in override.yaml).
+    
     Args:
         secret_name: Name of the secret
         secret_key: Key within the secret
-        namespace: Kubernetes namespace (required)
+        namespace: Kubernetes namespace where the secret exists (required)
+                    Must be in the allowedNamespaces list configured in Helm values
     
     Returns:
         JSON with backend, secret_name, secret_key, and decoded value
     
     Example:
         GET /secrets/database-credentials/password?namespace=production
+    
+    Note:
+        The namespace must be configured in the secrets-router Helm chart values:
+        secretStores.stores.kubernetes-secrets.namespaces list
     """
     try:
         result = await router.get_secret(secret_name, secret_key, namespace)

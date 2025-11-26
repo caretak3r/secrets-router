@@ -114,7 +114,7 @@ sequenceDiagram
         Sidecar-->>Router: Try next store
         
         Router->>Router: Try aws-secrets-manager
-        Router->>Sidecar: HTTP GET /v1.0/secrets/aws-secrets-manager/<br/>/app/secrets/production/db-creds
+        Router->>Sidecar: HTTP GET /secrets/aws-secrets-manager/<br/>(full path or configured path)
         Sidecar->>AWSComp: Component API call
         AWSComp->>AWSAPI: GetSecretValue(/app/secrets/production/db-creds)
         

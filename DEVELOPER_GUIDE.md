@@ -1,10 +1,18 @@
 # Developer Guide: Consuming Secrets
 
-This guide shows developers how to consume secrets from the Secrets Router service in their applications.
+This guide shows developers how to configure and consume secrets from the Secrets Router service in their applications.
 
 ## Overview
 
-The Secrets Router service provides a simple HTTP API to fetch secrets from Kubernetes Secrets or AWS Secrets Manager. Secrets are **namespace-scoped** - they exist in the namespace where your application is deployed.
+The Secrets Router service provides a simple HTTP API to fetch secrets from Kubernetes Secrets or AWS Secrets Manager. Secrets can be accessed from **multiple namespaces** - you configure which namespaces are accessible via Helm values in the `control-plane-umbrella` chart.
+
+## Architecture Context
+
+The Secrets Router is deployed as part of the `control-plane-umbrella` Helm chart:
+- **Umbrella Chart**: `control-plane-umbrella` installs Dapr and Secrets Router
+- **Secrets Router Chart**: Has dependency on Dapr, generates Dapr Component resources
+- **Dapr Components**: Configured via `secrets-components.yaml` template from Helm values
+- **Namespace**: All resources use `{{ .Release.Namespace }}` (no hardcoded namespaces)
 
 ## Quick Start
 
@@ -34,9 +42,9 @@ GET /secrets/{secret_name}/{secret_key}?namespace={namespace}
 
 ### Parameters
 
-- **`secret_name`** (path, required): Name of the Kubernetes Secret or AWS Secrets Manager secret
+- **`secret_name`** (path, required): Name of the Kubernetes Secret or AWS Secrets Manager secret. Can be a simple name (e.g., `database-credentials`) or a full path (e.g., `/app/secrets/production/database-credentials`). For AWS secrets, paths can be configured in Helm chart values.
 - **`secret_key`** (path, required): Key within the secret to retrieve
-- **`namespace`** (query, required): Kubernetes namespace where the secret is stored
+- **`namespace`** (query, required): Kubernetes namespace where the secret is stored (used for Kubernetes secrets)
 
 ## Examples
 
@@ -172,48 +180,130 @@ const dbPassword = await getSecret('database-credentials', 'password');
 const apiKey = await getSecret('api-keys', 'external-service-key');
 ```
 
+## Configuring Secret Stores
+
+### Step 1: Create Your Secrets
+
+Create secrets in any namespace where your application needs them:
+
+```bash
+# Create secret in production namespace
+kubectl create secret generic database-credentials \
+  --from-literal=password=secret123 \
+  --from-literal=username=admin \
+  -n production
+
+# Create secret in staging namespace
+kubectl create secret generic database-credentials \
+  --from-literal=password=staging123 \
+  --from-literal=username=admin \
+  -n staging
+```
+
+### Step 2: Configure Secret Stores in override.yaml
+
+Update the `override.yaml` file used with the `control-plane-umbrella` chart to include namespaces where secrets can be accessed:
+
+```yaml
+# override.yaml
+secrets-router:
+  enabled: true
+  
+  # Configure which namespaces secrets can be accessed from
+  secretStores:
+    enabled: true
+    stores:
+      kubernetes-secrets:
+        type: secretstores.kubernetes
+        defaultSecretStore: true
+        # Add namespaces where secrets exist
+        namespaces:
+          - production
+          - staging
+          - shared-services  # Add any namespace with secrets
+      
+      aws-secrets-manager:
+        type: secretstores.aws.secretsmanager
+        defaultSecretStore: false
+        region: us-east-1
+        pathPrefix: "/app/secrets"
+        auth:
+          secretStore: kubernetes
+```
+
+### Step 3: Upgrade Helm Release
+
+Apply the configuration:
+
+```bash
+helm upgrade control-plane ./charts/umbrella -f override.yaml -n <namespace>
+```
+
+This will:
+1. Generate Dapr Component resources for the configured secret stores
+2. Update the Secrets Router to access secrets from the specified namespaces
+
+### Step 4: Access Secrets from Applications
+
+Applications can now access secrets from any configured namespace:
+
+```python
+# Access secret from production namespace
+password = get_secret("database-credentials", "password", namespace="production")
+
+# Access secret from staging namespace  
+password = get_secret("database-credentials", "password", namespace="staging")
+```
+
 ## Secret Storage Locations
 
 ### Kubernetes Secrets
 
 Secrets stored as Kubernetes Secrets are accessed using:
-- **Format**: `namespace/secret-name`
-- **Location**: Same namespace as your application
+- **Format**: `namespace/secret-name` (namespace specified in API call)
+- **Location**: Any namespace configured in `override.yaml` → `secretStores.stores.kubernetes-secrets.namespaces`
 - **Auto-decoding**: K8s secrets are automatically decoded (base64 → plain text)
 
 **Example:**
 ```bash
-# Secret exists in Kubernetes as:
-# kubectl get secret database-credentials -n production
+# Secret exists in Kubernetes:
+kubectl get secret database-credentials -n production
 
-# Access via API:
+# Ensure namespace is in override.yaml secretStores configuration
+# Then access via API:
 GET /secrets/database-credentials/password?namespace=production
 ```
 
 ### AWS Secrets Manager
 
 Secrets stored in AWS Secrets Manager are accessed using:
-- **Format**: `{path-prefix}/{namespace}/{secret-name}`
-- **Default path prefix**: `/app/secrets`
-- **Location**: Configured in umbrella chart values
+- **Format**: Full path (with optional `pathPrefix` configured in Helm values)
+- **Location**: AWS Secrets Manager
+- **Configuration**: Configured in `override.yaml` → `secretStores.stores.aws-secrets-manager`
 
 **Example:**
-```bash
-# Secret exists in AWS Secrets Manager as:
-# /app/secrets/production/database-credentials
+```yaml
+# In override.yaml:
+aws-secrets-manager:
+  pathPrefix: "/app/secrets"
+```
 
-# Access via API:
-GET /secrets/database-credentials/password?namespace=production
+```bash
+# Access via API (pathPrefix is prepended):
+GET /secrets/production/database-credentials/password?namespace=production
+# Resolves to: /app/secrets/production/database-credentials
 ```
 
 ## Secret Resolution Priority
 
-The service tries secret stores in this order:
+The service tries secret stores in this order (configured via `SECRET_STORE_PRIORITY`):
 
-1. **Kubernetes Secrets** (in the specified namespace)
+1. **Kubernetes Secrets** (checks all configured namespaces in order)
 2. **AWS Secrets Manager** (if configured)
 
 If a secret is found in Kubernetes, it's returned immediately. If not found, AWS Secrets Manager is checked.
+
+**Note**: The `kubernetes-secrets` component checks namespaces in the order specified in `override.yaml`. If a secret exists in multiple namespaces, the first match is returned.
 
 ## Best Practices
 
@@ -297,12 +387,34 @@ class SecretManager:
 
 ### Secret Not Found (404)
 
+**Check 1: Verify secret exists**
 ```bash
 # Check if secret exists in namespace
 kubectl get secret my-secret -n production
+```
 
-# Check if secret exists in AWS Secrets Manager
-aws secretsmanager describe-secret --secret-id /app/secrets/production/my-secret
+**Check 2: Verify namespace is configured**
+```bash
+# Check Dapr Component configuration
+kubectl get component kubernetes-secrets -n <release-namespace> -o yaml
+
+# Verify namespace is in allowedNamespaces list
+```
+
+**Check 3: Update override.yaml if namespace missing**
+```yaml
+# Add missing namespace to override.yaml
+secretStores:
+  stores:
+    kubernetes-secrets:
+      namespaces:
+        - production  # Add this if missing
+        - staging
+```
+
+**Check 4: Upgrade helm release**
+```bash
+helm upgrade control-plane ./charts/umbrella -f override.yaml
 ```
 
 ### Wrong Namespace
@@ -313,6 +425,28 @@ Make sure you're using the correct namespace where your application is deployed:
 # Get namespace from Kubernetes downward API
 NAMESPACE = open('/var/run/secrets/kubernetes.io/serviceaccount/namespace').read().strip()
 ```
+
+**Also verify**: The namespace you're querying is in the `secretStores.stores.kubernetes-secrets.namespaces` list in `override.yaml`.
+
+### Component Not Found
+
+If Dapr Component is not created:
+
+1. **Check if secretStores.enabled is true**:
+   ```yaml
+   secretStores:
+     enabled: true  # Must be true
+   ```
+
+2. **Verify helm template renders correctly**:
+   ```bash
+   helm template control-plane ./charts/umbrella -f override.yaml | grep -A 20 "kind: Component"
+   ```
+
+3. **Check component exists after install**:
+   ```bash
+   kubectl get components -n <release-namespace>
+   ```
 
 ### Connection Issues
 
@@ -329,6 +463,61 @@ kubectl exec -it <your-pod> -n <namespace> -- \
 3. **Namespace isolation** - Secrets are namespace-scoped, providing isolation
 4. **RBAC** - Ensure your ServiceAccount has proper RBAC permissions
 
+## Integration with Service Helm Charts
+
+If your service helm chart is part of the `control-plane-umbrella`:
+
+### Option 1: Runtime Secret Fetching (Recommended)
+
+```python
+# In your application code
+import requests
+import os
+
+SECRETS_ROUTER_URL = os.getenv("SECRETS_ROUTER_URL", "http://secrets-router:8080")
+NAMESPACE = os.getenv("NAMESPACE")  # Set via downward API
+
+def get_secret(secret_name: str, secret_key: str) -> str:
+    url = f"{SECRETS_ROUTER_URL}/secrets/{secret_name}/{secret_key}"
+    params = {"namespace": NAMESPACE}
+    response = requests.get(url, params=params)
+    response.raise_for_status()
+    return response.json()["value"]
+```
+
+### Option 2: Init Container Pattern
+
+```yaml
+# In your service helm chart deployment.yaml
+initContainers:
+- name: fetch-secrets
+  image: curlimages/curl:latest
+  command:
+    - sh
+    - -c
+    - |
+      DB_PASSWORD=$(curl -s "http://secrets-router:8080/secrets/database-credentials/password?namespace={{ .Release.Namespace }}" | jq -r '.value')
+      echo "export DB_PASSWORD=$DB_PASSWORD" > /shared/secrets.sh
+  volumeMounts:
+    - name: shared-secrets
+      mountPath: /shared
+```
+
+### Option 3: Environment Variable Injection
+
+```yaml
+# In your service helm chart deployment.yaml
+containers:
+- name: app
+  env:
+  - name: SECRETS_ROUTER_URL
+    value: "http://secrets-router:8080"
+  - name: NAMESPACE
+    valueFrom:
+      fieldRef:
+        fieldPath: metadata.namespace
+```
+
 ## Migration from Direct Secret Access
 
 If you're currently mounting secrets as volumes:
@@ -342,9 +531,11 @@ volumes:
 ```
 
 **After:**
+1. Ensure namespace is configured in `override.yaml`
+2. Use Secrets Router API:
 ```python
 # Use Secrets Router API - values are always decoded
-password = get_secret("database-credentials", "password")
+password = get_secret("database-credentials", "password", namespace="production")
 ```
 
 ## Support

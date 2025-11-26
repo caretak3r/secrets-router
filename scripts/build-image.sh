@@ -19,13 +19,14 @@ if [ -n "${REGISTRY}" ]; then
 fi
 
 echo "Building Docker image: ${FULL_IMAGE_NAME}"
-echo "Working directory: ${SECRETS_ROUTER_DIR}"
+echo "Project root: ${PROJECT_ROOT}"
 
-cd "${SECRETS_ROUTER_DIR}"
+# Build from project root for proper Docker context
+cd "${PROJECT_ROOT}"
 
 docker build \
     --tag "${FULL_IMAGE_NAME}" \
-    --file Dockerfile \
+    --file secrets-router/Dockerfile \
     .
 
 echo "Successfully built image: ${FULL_IMAGE_NAME}"
