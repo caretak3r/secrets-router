@@ -4,105 +4,16 @@
 # Usage:
 #   helm install control-plane ./charts/umbrella -f override.yaml
 #
-# The override.yaml file can be used to customize secret store configurations
-# and other values for both the umbrella chart and child charts (dapr, secrets-router)
+# The override.yaml file can be used to customize configurations for
+# both the umbrella chart and child charts (dapr, secrets-router).
+# 
+# Child charts use their default values.yaml configurations unless overridden.
+# See charts/secrets-router/values.yaml for available configuration options.
 
 # Dapr Control Plane Configuration
 dapr:
   enabled: true
-  global:
-    mtls:
-      enabled: true
-    metrics:
-      enabled: true
-    tracing:
-      enabled: false
 
 # Secrets Router Service Configuration
 secrets-router:
   enabled: true
-  
-  # Image configuration
-  image:
-    repository: secrets-router
-    tag: latest
-    pullPolicy: IfNotPresent
-  
-  # Service configuration
-  service:
-    type: ClusterIP
-    port: 8080
-  
-  # Deployment configuration
-  deployment:
-    replicas: 2
-    resources:
-      requests:
-        cpu: 100m
-        memory: 128Mi
-      limits:
-        cpu: 500m
-        memory: 512Mi
-  
-  # Dapr configuration
-  dapr:
-    enabled: true
-    appId: secrets-router
-    appPort: 8080
-  
-  # Environment variables
-  env:
-    DEBUG_MODE: "false"
-    LOG_LEVEL: "INFO"
-    DAPR_HTTP_PORT: "3500"
-    # Secret store priority: kubernetes-secrets first, then aws-secrets-manager
-    SECRET_STORE_PRIORITY: "kubernetes-secrets,aws-secrets-manager"
-    SERVER_PORT: "8080"
-    # Service version
-    SERVICE_VERSION: "v0.0.1"
-  
-  # AWS Secrets Manager secret paths (optional)
-  # Configure full paths for AWS secrets here
-  # Example:
-  # awsSecretPaths:
-  #   database-credentials: "/app/secrets/production/database-credentials"
-  #   api-key: "/app/secrets/production/api-key"
-  
-  # ServiceAccount for AWS IRSA (if using AWS Secrets Manager)
-  serviceAccount:
-    create: true
-    annotations: {}
-      # Uncomment and configure if using AWS IRSA:
-      # eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT:role/secrets-router-role
-  
-  # Secret Stores Configuration
-  # Configure Dapr secret store components
-  # These components define where secrets can be accessed from
-  secretStores:
-    enabled: true
-    stores:
-      # Kubernetes Secrets Store
-      # Configure which namespaces secrets can be accessed from
-      kubernetes-secrets:
-        type: secretstores.kubernetes
-        defaultSecretStore: true
-        # List of namespaces where Kubernetes secrets can be accessed
-        # Secrets Router will check these namespaces in order
-        # If not specified, defaults to Release.Namespace
-        namespaces:
-          # - production
-          # - staging
-          # - default
-      
-      # AWS Secrets Manager Store
-      aws-secrets-manager:
-        type: secretstores.aws.secretsmanager
-        defaultSecretStore: false
-        region: us-east-1
-        # Optional: Path prefix for all AWS secrets
-        # pathPrefix: "/app/secrets"
-        auth:
-          secretStore: kubernetes
-          # When using IRSA, auth is handled via ServiceAccount annotations
-          # No additional auth metadata needed
-

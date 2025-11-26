@@ -237,35 +237,38 @@ graph LR
 
 ### Umbrella Chart Values
 
-Users install the umbrella chart with an `override.yaml` file:
+The umbrella chart `values.yaml` contains only high-level enable/disable flags:
 
 ```yaml
-# override.yaml
+# charts/umbrella/values.yaml
+dapr:
+  enabled: true
+
 secrets-router:
   enabled: true
-  env:
-    SECRET_STORE_PRIORITY: "kubernetes-secrets,aws-secrets-manager"
-  
-  # Configure secret stores - where secrets can be accessed from
+```
+
+**Default configurations** are defined in the child chart's `values.yaml` files:
+- `charts/secrets-router/values.yaml` - Contains all default configurations for Secrets Router
+- Dapr chart uses its own default values
+
+**Customization** is done via `override.yaml`:
+
+```yaml
+# override.yaml - Override only what you need to customize
+secrets-router:
+  # Override secret store namespaces
   secretStores:
-    enabled: true
     stores:
       kubernetes-secrets:
-        type: secretstores.kubernetes
-        defaultSecretStore: true
-        # List namespaces where Kubernetes secrets can be accessed
         namespaces:
           - production
           - staging
           - shared-services
-      
-      aws-secrets-manager:
-        type: secretstores.aws.secretsmanager
-        defaultSecretStore: false
-        region: us-east-1
-        pathPrefix: "/app/secrets"
-        auth:
-          secretStore: kubernetes
+  
+  # Override other settings as needed
+  env:
+    SECRET_STORE_PRIORITY: "kubernetes-secrets,aws-secrets-manager"
 ```
 
 ### Dapr Components

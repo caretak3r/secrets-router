@@ -42,33 +42,28 @@ kubectl create secret generic shared-api-key \
 
 ### Step 2: Configure Secret Stores
 
-Update `override.yaml` to tell Secrets Router where secrets can be accessed from:
+The umbrella chart `values.yaml` contains only enable/disable flags. Default configurations are in `charts/secrets-router/values.yaml`.
+
+Update `override.yaml` to customize secret store namespaces:
 
 ```yaml
 # override.yaml
+# Only override what you need to customize
+# Defaults come from charts/secrets-router/values.yaml
+
 secrets-router:
-  enabled: true
-  
-  # Configure secret stores - where secrets can be accessed from
+  # Override secret store namespaces
   secretStores:
-    enabled: true
     stores:
       kubernetes-secrets:
-        type: secretstores.kubernetes
-        defaultSecretStore: true
         # List namespaces where Kubernetes secrets can be accessed
         namespaces:
           - production
           - staging
           - shared-services  # Add namespace where secret exists
-      
-      aws-secrets-manager:
-        type: secretstores.aws.secretsmanager
-        defaultSecretStore: false
-        region: us-east-1
-        pathPrefix: "/app/secrets"
-        auth:
-          secretStore: kubernetes
+  
+  # Override other settings as needed (optional)
+  # See charts/secrets-router/values.yaml for all options
 ```
 
 ### Step 3: Upgrade Helm Release
@@ -168,10 +163,12 @@ containers:
 
 When you install/upgrade the umbrella chart with `override.yaml`:
 
-1. Helm processes `secrets-components.yaml` template
-2. Template generates Dapr Component resources based on `secretStores.stores` values
-3. Components are created in `{{ .Release.Namespace }}`
-4. Components configure which namespaces secrets can be accessed from
+1. Helm merges values: `umbrella/values.yaml` (defaults) + `override.yaml` (customizations)
+2. Child chart defaults from `secrets-router/values.yaml` are used unless overridden
+3. Helm processes `secrets-components.yaml` template
+4. Template generates Dapr Component resources based on `secretStores.stores` values
+5. Components are created in `{{ .Release.Namespace }}`
+6. Components configure which namespaces secrets can be accessed from
 
 ### 2. Secret Access Flow
 

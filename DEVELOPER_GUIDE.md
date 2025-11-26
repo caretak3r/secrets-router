@@ -202,34 +202,32 @@ kubectl create secret generic database-credentials \
 
 ### Step 2: Configure Secret Stores in override.yaml
 
-Update the `override.yaml` file used with the `control-plane-umbrella` chart to include namespaces where secrets can be accessed:
+The umbrella chart `values.yaml` contains only enable/disable flags. Default configurations are in `charts/secrets-router/values.yaml`.
+
+Update the `override.yaml` file to customize secret store namespaces:
 
 ```yaml
 # override.yaml
+# Only override what you need to customize
+# Defaults come from charts/secrets-router/values.yaml
+
 secrets-router:
-  enabled: true
-  
-  # Configure which namespaces secrets can be accessed from
+  # Override secret store namespaces
   secretStores:
-    enabled: true
     stores:
       kubernetes-secrets:
-        type: secretstores.kubernetes
-        defaultSecretStore: true
         # Add namespaces where secrets exist
         namespaces:
           - production
           - staging
           - shared-services  # Add any namespace with secrets
-      
-      aws-secrets-manager:
-        type: secretstores.aws.secretsmanager
-        defaultSecretStore: false
-        region: us-east-1
-        pathPrefix: "/app/secrets"
-        auth:
-          secretStore: kubernetes
+  
+  # Override other settings as needed (optional)
+  # env:
+  #   SECRET_STORE_PRIORITY: "kubernetes-secrets,aws-secrets-manager"
 ```
+
+**Note**: See `charts/secrets-router/values.yaml` for all available configuration options and their defaults.
 
 ### Step 3: Upgrade Helm Release
 
