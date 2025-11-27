@@ -1,0 +1,25 @@
+# Override configuration for testing
+# Target: secrets-router in one namespace, sample secrets in two namespaces
+
+# Global configuration
+global:
+  namespace: test-namespace
+
+# Configure to allow access to both test namespace and default namespace
+secrets-router:
+  # Use local image for testing
+  image:
+    pullPolicy: Never
+  
+  secretStores:
+    stores:
+      kubernetes-secrets:
+        namespaces:
+          - test-namespace    # Installation namespace
+          - default           # Additional namespace for cross-namespace testing
+    
+  # Update service version
+  env:
+    SERVICE_VERSION: "v0.0.1-test"
+    DEBUG_MODE: "true"  # Enable debug for testing
+    SECRET_STORE_PRIORITY: "kubernetes-secrets"  # Only use K8s for testing
