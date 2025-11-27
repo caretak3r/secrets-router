@@ -83,10 +83,15 @@ class SecretsRouter:
                 logger.debug(f"Trying {store_name} for {secret_name}/{secret_key}")
                 
                 # Construct secret key for Dapr component
-                dapr_key = self._build_secret_key(store_name, namespace, secret_name)
+                if "kubernetes" in store_name.lower():
+                    # For Kubernetes secrets API: use metadata.namespace parameter
+                    url = f"/v1.0/secrets/{store_name}/{secret_name}?metadata.namespace={namespace}"
+                else:
+                    # For AWS and other stores: use the key format
+                    dapr_key = self._build_secret_key(store_name, namespace, secret_name)
+                    url = f"/v1.0/secrets/{store_name}/{dapr_key}"
                 
                 # Fetch from Dapr component
-                url = f"/v1.0/secrets/{store_name}/{dapr_key}"
                 response = await self.http_client.get(url)
                 
                 if response.status_code == 404:
@@ -197,12 +202,12 @@ async def readiness_check():
     """
     Readiness probe endpoint.
     Returns HTTP 200 only if the service is ready to receive traffic.
-    Checks Dapr sidecar connectivity.
+    Checks Dapr sidecar connectivity and basic operations.
     """
     try:
-        # Check if Dapr sidecar is reachable
-        # Try to connect to Dapr sidecar health endpoint
-        health_url = f"{DAPR_HTTP_ENDPOINT}/healthz"
+        # Check if Dapr sidecar is reachable by testing the components endpoint
+        # Dapr provides metadata at /v1.0/metadata to confirm it's running
+        health_url = f"{DAPR_HTTP_ENDPOINT}/v1.0/metadata"
         async with httpx.AsyncClient(timeout=2.0) as client:
             response = await client.get(health_url)
             if response.status_code == 200:
@@ -213,8 +218,8 @@ async def readiness_check():
                     "version": SERVICE_VERSION
                 }
             else:
-                # Dapr sidecar not healthy
-                logger.warning(f"Dapr sidecar health check returned {response.status_code}")
+                # Dapr sidecar not responding correctly
+                logger.warning(f"Dapr sidecar metadata check returned {response.status_code}")
                 raise HTTPException(
                     status_code=503,
                     detail={
