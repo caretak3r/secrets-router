@@ -8,30 +8,31 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install dependencies
+# Copy requirements and install dependencies to system location
 COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY main.py .
 
-# Final stage: distroless Python image
-FROM gcr.io/distroless/python3-debian12:latest
+# Final stage: use regular Python image instead of distroless for easier debugging
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# Copy Python dependencies from builder
-COPY --from=builder /root/.local /root/.local
+# Copy Python dependencies from builder to system location
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy application code
 COPY --from=builder /app/main.py .
 
-# Set Python path to include user local packages
-ENV PYTHONPATH=/root/.local/lib/python3.11/site-packages:$PYTHONPATH
-ENV PATH=/root/.local/bin:$PATH
+# Set PYTHONPATH to include system packages
+ENV PYTHONPATH=/usr/local/lib/python3.11/site-packages:$PYTHONPATH
 
 # Run as non-root user
-USER 65532:65532
+RUN useradd -m -u 65532 -s /bin/bash runner
+USER runner
 
 # Expose port
 EXPOSE 8080
