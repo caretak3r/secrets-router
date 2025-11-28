@@ -1,0 +1,60 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: demo-secrets-router
+  namespace: monitoring
+  labels:
+    purpose: "secrets-router-monitoring"
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: secrets-router
+      app.kubernetes.io/instance: demo-broker
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 15s
+    honorLabels: true
+    params:
+      format: [prometheus]
+      job_name: demo-secrets-router
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: demo-broker-dapr
+  namespace: monitoring
+  labels:
+    purpose: "dapr-monitoring"
+spec:
+  selector:
+    matchLabels:
+      app: daprd
+  endpoints:
+    - port: metrics
+    path: /metrics
+    interval: 15s
+    honorLabels: true
+    params:
+      format: [prometheus]
+      job_name: demo-broker-dapr
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: demo-test-client
+  namespace: monitoring
+  labels:
+    purpose: "test-client-monitoring"
+spec:
+  selector:
+    matchLabels:
+      app: test-client
+  namespaceSelector:
+    matchNames:
+      - demo
+  endpoints:
+  - port: 8080
+    path: /metrics
+    interval: 30s
+    honorLabels: true

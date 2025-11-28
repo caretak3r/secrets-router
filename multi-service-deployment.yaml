@@ -1,0 +1,381 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: perf-service-1
+  namespace: perf-test-ns-1
+  labels:
+    app: perf-service-1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: perf-service-1
+  template:
+    metadata:
+      labels:
+        app: perf-service-1
+    spec:
+      containers:
+      - name: perf-service-1
+        image: python:3.11-slim
+        command:
+        - /bin/bash
+        - -c
+        - |
+          apt-get update && apt-get install -y curl
+          while true; do
+            curl -s "http://secrets-broker-test-secrets-router.test-namespace.svc.cluster.local:8080/secrets/shared-database-secret/password?namespace=test-namespace"
+            sleep 2
+          done
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: perf-service-2
+  namespace: perf-test-ns-1
+  labels:
+    app: perf-service-2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: perf-service-2
+  template:
+    metadata:
+      labels:
+        app: perf-service-2
+    spec:
+      containers:
+      - name: perf-service-2
+        image: python:3.11-slim
+        command:
+        - /bin/bash
+        - -c
+        - |
+          apt-get update && apt-get install -y curl
+          while true; do
+            curl -s "http://secrets-broker-test-secrets-router.test-namespace.svc.cluster.local:8080/secrets/shared-database-secret/username?namespace=test-namespace"
+            sleep 3
+          done
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: perf-service-3
+  namespace: perf-test-ns-1
+  labels:
+    app: perf-service-3
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: perf-service-3
+  template:
+    metadata:
+      labels:
+        app: perf-service-3
+    spec:
+      containers:
+      - name: perf-service-3
+        image: python:3.11-slim
+        command:
+        - /bin/bash
+        - -c
+        - |
+          apt-get update && apt-get install -y curl
+          while true; do
+            curl -s "http://secrets-broker-test-secrets-router.test-namespace.svc.cluster.local:8080/secrets/shared-database-secret/connection-string?namespace=test-namespace"
+            sleep 2.5
+          done
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: perf-service-4
+  namespace: perf-test-ns-2
+  labels:
+    app: perf-service-4
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: perf-service-4
+  template:
+    metadata:
+      labels:
+        app: perf-service-4
+    spec:
+      containers:
+      - name: perf-service-4
+        image: python:3.11-slim
+        command:
+        - /bin/bash
+        - -c
+        - |
+          apt-get update && apt-get install -y curl
+          while true; do
+            curl -s "http://secrets-broker-test-secrets-router.test-namespace.svc.cluster.local:8080/secrets/shared-database-secret/password?namespace=test-namespace"
+            sleep 1.5
+          done
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: perf-service-5
+  namespace: perf-test-ns-2
+  labels:
+    app: perf-service-5
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: perf-service-5
+  template:
+    metadata:
+      labels:
+        app: perf-service-5
+    spec:
+      containers:
+      - name: perf-service-5
+        image: python:3.11-slim
+        command:
+        - /bin/bash
+        - -c
+        - |
+          apt-get update && apt-get install -y curl
+          while true; do
+            curl -s "http://secrets-broker-test-secrets-router.test-namespace.svc.cluster.local:8080/secrets/shared-database-secret/username?namespace=test-namespace"
+            sleep 2.8
+          done
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: perf-service-6
+  namespace: perf-test-ns-2
+  labels:
+    app: perf-service-6
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: perf-service-6
+  template:
+    metadata:
+      labels:
+        app: perf-service-6
+    spec:
+      containers:
+      - name: perf-service-6
+        image: python:3.11-slim
+        command:
+        - /bin/bash
+        - -c
+        - |
+          apt-get update && apt-get install -y curl
+          while true; do
+            curl -s "http://secrets-broker-test-secrets-router.test-namespace.svc.cluster.local:8080/secrets/shared-database-secret/connection-string?namespace=test-namespace"
+            sleep 3.2
+          done
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: perf-service-7
+  namespace: perf-test-ns-2
+  labels:
+    app: perf-service-7
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: perf-service-7
+  template:
+    metadata:
+      labels:
+        app: perf-service-7
+    spec:
+      containers:
+      - name: perf-service-7
+        image: python:3.11-slim
+        command:
+        - /bin/bash
+        - -c
+        - |
+          apt-get update && apt-get install -y curl
+          while true; do
+            curl -s "http://secrets-broker-test-secrets-router.test-namespace.svc.cluster.local:8080/secrets/shared-database-secret/password?namespace=test-namespace"
+            sleep 1.8
+          done
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: perf-service-8
+  namespace: perf-test-ns-3
+  labels:
+    app: perf-service-8
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: perf-service-8
+  template:
+    metadata:
+      labels:
+        app: perf-service-8
+    spec:
+      containers:
+      - name: perf-service-8
+        image: python:3.11-slim
+        command:
+        - /bin/bash
+        - -c
+        - |
+          apt-get update && apt-get install -y curl
+          while true; do
+            curl -s "http://secrets-broker-test-secrets-router.test-namespace.svc.cluster.local:8080/secrets/shared-database-secret/username?namespace=test-namespace"
+            sleep 2.3
+          done
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: perf-service-9
+  namespace: perf-test-ns-3
+  labels:
+    app: perf-service-9
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: perf-service-9
+  template:
+    metadata:
+      labels:
+        app: perf-service-9
+    spec:
+      containers:
+      - name: perf-service-9
+        image: python:3.11-slim
+        command:
+        - /bin/bash
+        - -c
+        - |
+          apt-get update && apt-get install -y curl
+          while true; do
+            curl -s "http://secrets-broker-test-secrets-router.test-namespace.svc.cluster.local:8080/secrets/shared-database-secret/connection-string?namespace=test-namespace"
+            sleep 2.7
+          done
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: perf-service-10
+  namespace: perf-test-ns-3
+  labels:
+    app: perf-service-10
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: perf-service-10
+  template:
+    metadata:
+      labels:
+        app: perf-service-10
+    spec:
+      containers:
+      - name: perf-service-10
+        image: python:3.11-slim
+        command:
+        - /bin/bash
+        - -c
+        - |
+          apt-get update && apt-get install -y curl
+          while true; do
+            curl -s "http://secrets-broker-test-secrets-router.test-namespace.svc.cluster.local:8080/secrets/shared-database-secret/password?namespace=test-namespace" &
+            curl -s "http://secrets-broker-test-secrets-router.test-namespace.svc.cluster.local:8080/secrets/shared-database-secret/username?namespace=test-namespace" &
+            wait
+            sleep 1
+          done
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi

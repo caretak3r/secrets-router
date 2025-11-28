@@ -1,0 +1,79 @@
+{
+  "annotations": {
+    "description": "K8s Secrets Broker - Prometheus Dashboard",
+    "tags": ["prometheus"],
+    "refresh": "30s"
+  },
+  "editable": true,
+  "gnetId": null,
+  "gnetUrl": "",
+  "id": null,
+  "links": [],
+  "schemaVersion": 17,
+  "style": "dark",
+  "tags": ["prometheus"],
+  "templating": {
+    "list": [
+      {
+        "allPanels": [
+          {
+            "id": 1, 
+            "title": "Service Health", 
+            "type": "stat",
+            "refresh": "30s",
+            "targets": [
+              {
+                "expr": "up",
+                "legendFormat": "Service Health Status"
+              }
+            ],
+            "gridPos": {
+              "h": 8,
+              "w": 12, 
+              "x": 0, 
+              "y": 0
+            }
+          },
+          {
+            "id": 2,
+            "title": "Request Rate", 
+            "type": "timeline",
+            "refresh": "15s",
+            "time": {
+              "from": "now-5m",
+              "to": "now",
+              "hide": false,
+              "show_points": true,
+              "show_variables": false
+            },
+            "targets": [
+              {
+                "expr": "rate(http_requests_total{pod_label_app_kubernetes_io_name=\"demo-broker-secrets-router\"}[1m])",
+                "format": "Requests/sec"
+              }
+            ],
+            "display": {
+              "sparkline": {
+                "threshold": 0.1,
+                "threshold_color": "red"
+              },
+              "lines": false,
+              "fill": true,
+              "gridPos": {
+                "h": 8,
+                "w": 12, 
+                "x": 0, 
+                "y": 5
+              }
+            }
+          }
+        ]
+      ]
+    }
+  },
+    "time": {
+      "from": "now-5m",
+      "to": "now"
+    }
+  }
+}
