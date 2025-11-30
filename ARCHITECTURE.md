@@ -286,24 +286,34 @@ graph LR
     style SAMPLE fill:#ffa07a
 ```
 
-### Enhanced Deployment Features
+### Enhanced Deployment Features with Dapr Timing Optimizations
 
-#### Health Check Integration
-- **Startup Probe**: Extended failure threshold (30) handles Dapr sidecar timing
-- **Readiness Probe**: Validates Dapr connectivity before accepting traffic
-- **Liveness Probe**: Standard health monitoring with appropriate delays
-- **Service Discovery**: Comprehensive DNS connectivity validation
+#### Health Check Integration (Optimized for Dapr Sidecar)
+- **Startup Probe**: Extended failure threshold (12) provides 60-second window for Dapr initialization
+- **Readiness Probe**: Reduced initial delay (5s) for faster readiness detection, validates Dapr connectivity
+- **Liveness Probe**: Standard interval (15s) with appropriate delays for stable health monitoring
+- **Probe Differentiation**: `/healthz` for basic service health, `/readyz` for Dapr connectivity validation
+- **Service Discovery**: Dynamic endpoint resolution using `{release-name}-secrets-router.{namespace}.svc.cluster.local:8080`
 
 #### Restart Policy Management
-- **Deployment Resources**: Standard `restartPolicy: Always` for production stability
-- **Pod Resources**: Configurable restartPolicy for test scenarios and debugging
-- **Container Images**: Development vs production pull policies (Never vs Always)
+- **Production Services**: `restartPolicy: Always` for secrets-router (Deployment resource standard)
+- **Test Services**: `restartPolicy: Never` for one-time test runners to prevent CrashLoopBackOff
+- **Debugging Support**: `restartPolicy: OnFailure` option for investigation scenarios
+- **Container Images**: Development `pullPolicy: Never` vs production `pullPolicy: Always`
+
+#### Component Conflict Resolution
+- **AWS Components**: Properly disabled in test configurations via `test-override.yaml`
+- **Template Variables**: Dynamic namespace resolution using `{{ .Release.Namespace }}`
+- **Resource Isolation**: Each test runs in isolated namespace to prevent conflicts
 
 #### Testing Infrastructure Integration
 - **Minimal Override Methodology**: Override files contain only values different from chart defaults
 - **Namespace Isolation**: Each test scenario in isolated namespace
 - **Automated Orchestrator**: Builds containers and manages dependencies efficiently
-- **Health Validation**: StartupProbe allows adequate time for Dapr initialization
+- **Health Validation**: StartupProbe with 60-second window handles Dapr sidecar timing issues
+- **Curl Fix Resolution**: Bash scripts use proper quote escaping (`\n%{http_code}` with single quotes)
+- **Dynamic Service Discovery**: Template-based URL generation eliminates hardcoded namespace references
+- **Restart Policy Optimization**: Test services use `Never` policy to prevent unnecessary restart loops
 
 ### Container Build and Image Management
 

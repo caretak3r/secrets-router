@@ -88,6 +88,44 @@ response = requests.get(
 secret_value = response.json()["value"]
 ```
 
+### Health Check Configuration
+
+The Secrets Router includes enhanced health check configurations optimized for Dapr sidecar timing:
+
+```yaml
+# Enhanced health checks addressing Dapr initialization
+healthChecks:
+  liveness:
+    enabled: true
+    path: /healthz
+    initialDelaySeconds: 15
+    periodSeconds: 15
+  readiness:
+    enabled: true
+    path: /readyz
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 6
+  startupProbe:
+    enabled: true
+    path: /healthz
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    failureThreshold: 12  # Extended for Dapr timing issues
+```
+
+### Dynamic Service Discovery
+
+Sample services now use dynamic endpoint configuration with the `sample-service.secretsRouterURL` helper template:
+
+```yaml
+# Automatically generates service URL: {release-name}-secrets-router.{namespace}.svc.cluster.local:8080
+env:
+  - name: SECRETS_ROUTER_URL
+    value: {{ include "sample-service.secretsRouterURL" . | quote }}
+```
+
 ## Architecture
 
 ```
@@ -339,7 +377,32 @@ The project includes comprehensive testing workflows with automated test orchest
 
 ## Troubleshooting
 
-See [DEVELOPER_GUIDE.md](./DEVELOPER_GUIDE.md#troubleshooting) for troubleshooting tips.
+### Common Issues and Solutions
+
+#### Dapr Sidecar Timing Issues
+**Symptoms**: Pods restart during startup, readiness probe failures
+**Solutions**: Enhanced health checks now use startupProbe with 12 failure thresholds (60s startup window) and faster readiness delays (5s instead of 30s).
+
+#### Curl Command Issues
+**Symptoms**: Bash scripts failing with HTTP request errors
+**Solutions**: Fixed quote escaping in bash scripts - changed from double quotes to single quotes around curl format strings: `curl -s -w '\n%{http_code}'`
+
+#### Component Naming Conflicts
+**Symptoms**: "kubernetes already exists" errors in Dapr logs
+**Solutions**: Properly disable AWS components in test configurations and ensure unique component names.
+
+#### Cross-Namespace Service Discovery
+**Symptoms**: Sample services cannot connect to secrets router
+**Solutions**: Dynamic service URL generation now uses `{release-name}-secrets-router.{namespace}.svc.cluster.local:8080` template instead of hardcoded values.
+
+#### Sample Service Restart Policy
+**Symptoms**: CrashLoopBackOff after successful completion
+**Solutions**: Sample test runners now use `restartPolicy: Never` instead of "Always" for one-time test scenarios.
+
+#### Image Pull Policy for Testing
+**Best Practice**: Use `image.pullPolicy: Never` in override files for local development to ensure locally built images are used.
+
+For comprehensive troubleshooting procedures, see [TESTING_WORKFLOW.md](./TESTING_WORKFLOW.md) and [DEVELOPER.md](./DEVELOPER.md#troubleshooting).
 
 ## License
 

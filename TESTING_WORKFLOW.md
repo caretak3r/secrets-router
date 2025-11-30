@@ -81,6 +81,44 @@ sample-service:
 
 **Principle**: If the value is the same as in the base chart, DO NOT include it in the override.yaml!
 
+### Test-Override Configuration
+
+For comprehensive test settings, use `charts/umbrella/test-override.yaml` which includes optimized configurations:
+
+```yaml
+# test-override.yaml - Test optimization settings
+secrets-router:
+  secretStores:
+    aws:
+      enabled: false  # Disable AWS components for K8s-only testing
+  image:
+    pullPolicy: Never  # Use local images
+  healthChecks:
+    liveness:
+      initialDelaySeconds: 15
+      periodSeconds: 15
+      timeoutSeconds: 3
+      failureThreshold: 3
+    readiness:
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 6
+    startupProbe:
+      enabled: true
+      path: /healthz
+      port: 8080
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 12  # Extended for Dapr timing
+
+sample-service:
+  image:
+    pullPolicy: Never  # Use local images
+  restartPolicy: Never  # Prevent restarts for one-time tests
+```!
+
 ## Step 1: Orchestrated Container Building
 
 The test orchestrator optimizes container building by building only when source code has changed:
@@ -303,6 +341,71 @@ kubectl get pods -n <namespace> -o wide | grep dapr
 # Check Dapr logs
 kubectl logs -n <namespace> <pod-name> -c daprd
 ```
+
+### 6.2 Enhanced Health Check Validation with StartupProbe Support
+
+The enhanced health check configuration specifically addresses Dapr timing issues:
+
+```bash
+# Verify startupProbe configuration provides adequate timing
+kubectl get pods -n <namespace> -o yaml | grep -A 20 "startupProbe"
+
+# Test differentiated health endpoints
+kubectl exec -n <namespace> <pod-name> -- curl -s http://localhost:8080/healthz
+kubectl exec -n <namespace> <pod-name> -- curl -s http://localhost:8080/readyz
+
+# Monitor readiness probe behavior during Dapr initialization
+kubectl get pods -n <namespace> -w
+```
+
+**Key Improvements:**
+- **Readiness Delay**: Reduced from 30s to 5s for faster service availability
+- **Startup Window**: Extended to 60s (12 failures × 5s periods) for Dapr sidecar initialization
+- **Probe Differentiation**: `/healthz` for basic health, `/readyz` for Dapr connectivity
+
+### 6.3 Curl Command Issues Resolution
+
+Bash sample services now use proper quote escaping:
+
+```bash
+# Before (failing due to quote escaping)
+curl -s -w "\n%{http_code}" 
+
+# After (fixed with single quotes)
+curl -s -w '\n%{http_code}'
+
+# Test bash client manually
+kubectl exec -n <namespace> <bash-pod> -- bash /usr/src/app/test.sh
+```
+
+### 6.4 Component Conflict Management
+
+AWS component conflicts resolved through test-override.yaml:
+
+```yaml
+# Disable conflicting AWS components for K8s-only testing
+secrets-router:
+  secretStores:
+    aws:
+      enabled: false
+```
+
+### 6.5 Restart Policy Configuration for Test Services
+
+Sample test runners now use optimized restart policies:
+
+```bash
+# Check restart policy prevents CrashLoopBackOff after completion
+kubectl get pods -n <namespace> -o yaml | grep restartPolicy
+
+# Verify completed state for one-time test runners
+kubectl get pods -n <namespace> -l app.kubernetes.io/name=sample-service-bash
+```
+
+**Benefits:**
+- Prevents unnecessary restart loops for test scenarios
+- Allows proper "Completed" state transition
+- Reduces resource consumption during testing
 
 ### 6.2 Reset and Cleanup
 ```bash

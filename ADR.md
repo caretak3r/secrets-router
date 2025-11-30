@@ -1365,7 +1365,281 @@ kubectl exec -n <namespace> <pod> -- curl http://localhost:8080/readyz
 
 ---
 
-# ADR-003: Restart Policy Configuration for Testing and Production Scenarios
+# ADR-003: Enhanced Health Check Configuration for Dapr Timing Issues
+
+## Status
+**Accepted** | Date: 2025-11-30 | Authors: Platform Engineering Team
+
+## Context
+
+During testing and development, we encountered significant issues with Dapr sidecar initialization timing. The standard Kubernetes liveness and readiness probes were not providing adequate time for Dapr sidecars to establish connectivity with the control plane, leading to:
+
+1. **Pod Restart Cycles**: Kubernetes restarting secrets-router pods before Dapr sidecar was ready
+2. **Flaky Deployments**: Inconsistent pod readiness across different environments
+3. **Dapr Connection Failures**: Readiness probe succeeding while Dapr sidecar connectivity was still pending
+4. **Testing Instability**: Test scenarios failing due to timing variations during local development
+
+The existing health check configuration used standard defaults:
+- Liveness/Readiness: 30s initial delay, 10-5s period, 3 failure threshold
+- No startup probe configured
+- Single health endpoint (`/healthz`) for both liveness and readiness
+
+## Decision Drivers
+
+1. **Dapr Timing Variability**: Dapr sidecar injection and Sentry connection establishment varies significantly (30s-5min)
+2. **Production Stability**: Need reliable deployment behavior across all environments
+3. **Testing Repeatability**: Test scenarios must be consistent and reliable
+4. **Service Availability**: Prevent premature pod restarts during Dapr initialization
+5. **Readiness Accuracy**: Service should only accept traffic when Dapr sidecar is connected
+6. **Operational Simplicity**: Solution must work without manual intervention
+7. **Resource Efficiency**: Avoid unnecessary restarts and resource waste
+
+## Considered Options
+
+### Option 1: Extended Initial Delays Only
+```yaml
+# Simple approach: extend existing probe delays
+livenessProbe:
+  initialDelaySeconds: 120  # Extended from 30s
+readinessProbe:
+  initialDelaySeconds: 120  # Extended from 30s
+```
+
+**Pros:**
+- Simple to implement
+- No additional probe endpoints needed
+- Maintains existing health check logic
+
+**Cons:**
+- Fixed delay may be insufficient on slow networks
+- Delays pod readiness even when Dapr is ready faster
+- No graceful failure handling for extended Dapr failures
+- Still single endpoint for both probes
+
+### Option 2: Startup Probe with Enhanced Readiness Check
+```yaml
+# Comprehensive approach with startup probe and differentiated endpoints
+startupProbe:
+  httpGet:
+    path: /healthz
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  failureThreshold: 30  # 5 minutes total
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 8080
+  initialDelaySeconds: 30
+readinessProbe:
+  httpGet:
+    path: /readyz  # Different endpoint
+    port: 8080
+  initialDelaySeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+```
+
+**Pros:**
+- Provides extended initialization window specifically for startup
+- Differentiated endpoints allow proper readiness validation
+- Handles Dapr timing variations gracefully
+- Kubernetes won't restart pods during startup window
+- Readiness can fail independently of startup probe
+
+**Cons:**
+- More complex configuration
+- Requires additional endpoint implementation
+- More probe configurations to manage
+
+### Option 3: Dapr-Sidecar-Aware Health Checks
+```yaml
+# Check Dapr sidecar status directly
+readinessProbe:
+  exec:
+    command:
+    - /bin/sh
+    - -c
+    - curl -f http://localhost:3500/v1.0/healthz && curl -f http://localhost:8080/readyz
+```
+
+**Pros:**
+- Direct Dapr sidecar health validation
+- Guarantees Dapr is ready before service is ready
+- Most accurate readiness determination
+
+**Cons:**
+- Tightly couples service to Dapr implementation
+- More complex probe command
+- Debugging difficulty when probe fails
+- Relies on localhost networking
+- Security concerns with exec commands
+
+## Decision Outcome
+
+**Chosen Solution: Option 2 - Startup Probe with Enhanced Readiness Check**
+
+We chose the startup probe with differentiated endpoints approach because it provides the best balance of reliability, simplicity, and operational clarity.
+
+### Implementation Details
+
+#### Enhanced Health Endpoint Behavior
+
+**`/healthz` Endpoint (Basic Service Health):**
+```json
+{
+  "status": "healthy",
+  "service": "secrets-router",
+  "version": "1.0.0"
+}
+```
+
+**`/readyz` Endpoint (Dapr Connectivity Check):**
+```json
+// When Dapr sidecar is connected:
+{
+  "status": "ready",
+  "service": "secrets-router",
+  "dapr_sidecar": "connected",
+  "version": "1.0.0"
+}
+
+// When Dapr sidecar is not available:
+{
+  "status": "not_ready",
+  "service": "secrets-router",
+  "dapr_sidecar": "disconnected",
+  "error": "Cannot connect to Dapr sidecar"
+}
+```
+
+#### Optimized Probe Configuration
+```yaml
+# Final configuration in charts/secrets-router/values.yaml
+healthChecks:
+  liveness:
+    enabled: true
+    path: /healthz
+    initialDelaySeconds: 15
+    periodSeconds: 15
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readiness:
+    enabled: true
+    path: /readyz
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 6
+  startupProbe:
+    enabled: true
+    path: /healthz
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 12  # Extended for Dapr timing issues
+```
+
+## Consequences
+
+### Positive
+
+1. **Deployment Reliability**: Eliminates pod restart cycles during Dapr initialization
+2. **Testing Consistency**: Test deployments are now predictable and repeatable
+3. **Production Readiness**: Service only accepts traffic when fully ready
+4. **Operational Clarity**: Clear distinction between service health and Dapr connectivity
+5. **Graceful Degradation**: Service can have basic health even when Dapr is temporarily unavailable
+6. **Extended Initialization**: Up to 5 minutes for Dapr sidecar connection establishment
+
+### Negative
+
+1. **Increased Complexity**: Three probe configurations vs. previous two
+2. **Additional Endpoint**: Need to maintain both `/healthz` and `/readyz` endpoints
+3. **Longer Startup Time**: Service may take longer to appear "ready" (by design)
+4. **Configuration Overhead**: More probe settings to configure and tune
+
+### Neutral
+
+1. **Resource Impact**: Minimal resource overhead for additional probe
+2. **Monitoring Impact**: Additional health metrics to monitor and alert on
+3. **Debugging Complexity**: Multiple probe states to diagnose during issues
+
+## Implementation Notes
+
+### Service Code Changes
+```python
+# FastAPI endpoint implementations
+@app.get("/healthz")
+async def health_check():
+    """Basic health check - service is running"""
+    return {
+        "status": "healthy",
+        "service": "secrets-router", 
+        "version": "1.0.0"
+    }
+
+@app.get("/readyz")
+async def readiness_check():
+    """Readiness check - service and Dapr sidecar are ready"""
+    # Check Dapr sidecar connectivity
+    dapr_healthy = await check_dapr_connectivity()
+    
+    if dapr_healthy:
+        return {
+            "status": "ready",
+            "service": "secrets-router",
+            "dapr_sidecar": "connected",
+            "version": "1.0.0"
+        }
+    else:
+        return {
+            "status": "not_ready",
+            "service": "secrets-router",
+            "dapr_sidecar": "disconnected",
+            "error": "Cannot connect to Dapr sidecar"
+        }, 503  # HTTP 503 for readiness probe
+```
+
+### Testing Validation
+```bash
+# Validation commands for testing
+kubectl get pods -n <namespace> -o yaml | grep -A 20 startupProbe
+kubectl get pods -n <namespace> -o yaml | grep -A 15 readinessProbe
+kubectl get pods -n <namespace> -o yaml | grep -A 10 livenessProbe
+
+# Test endpoints directly
+kubectl exec -n <namespace> <pod> -- curl http://localhost:8080/healthz
+kubectl exec -n <namespace> <pod> -- curl http://localhost:8080/readyz
+```
+
+### Troubleshooting Guide
+
+**Symptom: Pods stuck in PodInitializing**
+- Check startupProbe logs and timing
+- Verify Dapr sidecar injection is working
+- Review Dapr control plane health
+
+**Symptom: Pods Ready but Not Serving Traffic**
+- Check `/readyz` endpoint response
+- Verify Dapr sidecar connectivity
+- Review Dapr component configuration
+
+**Symptom: Pods Restarting Frequently**
+- Check liveness probe logs
+- Verify `/healthz` endpoint is responding
+- Review pod resource constraints
+
+## Future Considerations
+
+1. **Configuration Tuning**: Monitor performance and adjust failureThreshold/periodSeconds based on production metrics
+2. **Probe Optimization**: Consider probe-specific configurations for different deployment environments
+3. **Metrics Enhancement**: Add detailed metrics for probe timings and Dapr connection establishment
+4. **Alerting Integration**: Configure alerts based on probe failure patterns
+5. **Multi-Environment Support**: Environment-specific probe configurations for development vs. production
+
+---
+
+# ADR-004: Restart Policy Configuration for Testing and Production Scenarios
 
 ## Status
 **Accepted** | Date: 2025-11-30 | Authors: Platform Engineering Team

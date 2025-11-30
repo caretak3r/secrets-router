@@ -626,41 +626,46 @@ volumes:
 password = get_secret("database-credentials", "password", namespace="production")
 ```
 
-## Health Check Integration
+## Health Check Integration with Enhanced Dapr Timing Support
 
 The Secrets Router includes comprehensive health check configurations to handle Dapr initialization timing issues:
 
-### Health Check Endpoints
-- **Liveness Probe**: `/healthz` - Basic service health
-- **Readiness Probe**: `/readyz` - Checks Dapr sidecar connectivity
-- **Startup Probe**: `/healthz` with extended failure threshold for Dapr startup
-
-### Health Check Configuration
+### Health Check Configuration (Optimized for Dapr)
 ```yaml
-# From charts/secrets-router/values.yaml
+# Enhanced health checks in charts/secrets-router/values.yaml
 healthChecks:
   liveness:
     enabled: true
     path: /healthz
-    initialDelaySeconds: 30
+    initialDelaySeconds: 15
+    periodSeconds: 15
+    timeoutSeconds: 3
+    failureThreshold: 3
   readiness:
     enabled: true
     path: /readyz
-    initialDelaySeconds: 30
-    timeoutSeconds: 5
-    failureThreshold: 3
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 6
   startupProbe:
     enabled: true
     path: /healthz
-    initialDelaySeconds: 10
-    periodSeconds: 10
-    timeoutSeconds: 5
-    failureThreshold: 30  # Extended for Dapr timing issues
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 12  # Extended for Dapr timing issues (~60s startup window)
 ```
+
+### Key Optimizations
+- **Readiness Delay**: Reduced from 30s to 5s for faster readiness detection
+- **Startup Probe**: Added with 60-second window (12 failures × 5s periods)
+- **Failure Thresholds**: Optimized for stable Dapr sidecar connections
+- **Path Differentiation**: `/healthz` for basic health, `/readyz` for Dapr connectivity validation
 
 ### Health Response Format
 ```json
-// /healthz response (HTTP 200)
+// /healthz response (HTTP 200) - Basic service health
 {
   "status": "healthy",
   "service": "secrets-router",
@@ -685,7 +690,38 @@ healthChecks:
 }
 ```
 
-The startupProbe ensures that containers have adequate time to establish the Dapr sidecar connection before Kubernetes marks them as ready, preventing premature restarts during deployment.
+The startupProbe with extended failure threshold ensures containers have adequate time to establish Dapr sidecar connection before Kubernetes marks them as ready, preventing premature restarts during deployment.
+
+## Restart Policy Configuration for Testing and Production
+
+### Production vs Testing Restart Policies
+
+#### Production Services (secrets-router)
+```yaml
+# Deployment resources (standard)
+deployment:
+  replicas: 1
+  restartPolicy: Always  # Required for Deployments
+```
+
+#### Sample Test Services (Configurable)
+```yaml
+# charts/sample-service/values.yaml
+restartPolicy: Always  # Default, configurable for testing
+
+# Testing override for one-time test runners
+# testing/N/override.yaml
+sample-service:
+  restartPolicy: Never  # Prevents restarts after completion
+```
+
+### Restart Policy Best Practices
+- **secrets-router**: Always use `restartPolicy: Always` (Deployment resource)
+- **Sample Services**: Use `restartPolicy: Never` for one-time test scenarios
+- **Debugging**: Set `restartPolicy: OnFailure` to investigate failures without continuous loops
+
+### Sample Service Completion Behavior
+With `restartPolicy: Never`, sample test runners properly transition to "Completed" state after successful execution, preventing CrashLoopBackOff issues seen with "Always" policy.
 
 ## Deployment and Testing Guide
 
@@ -694,6 +730,47 @@ See [TESTING_WORKFLOW.md](./TESTING_WORKFLOW.md) for comprehensive testing proce
 
 ### Local Testing Steps
 1. **Build all containers**: `make build IMAGE_TAG=latest`
+
+### Troubleshooting Common Issues
+
+#### Dapr Sidecar Connection Failures
+**Symptoms**: Readiness probe failures, pods marked as not ready
+**Causes**: Dapr sidecar not ready or connection establishment delays
+**Solutions**: 
+- Enhanced startupProbe provides 60s initialization window
+- Check Dapr control plane health: `kubectl get pods -n dapr-system`
+- Verify component configurations: `kubectl get components -n <namespace>`
+- Review Dapr sidecar logs: `kubectl logs -n <namespace> <pod> -c daprd`
+
+#### Curl HTTP Request Failures in Bash Clients
+**Symptoms**: Bash scripts failing with " malformed" or unexpected token errors
+**Causes**: Quote escaping issues in curl format strings
+**Solutions**: 
+- bash script now uses single quotes: `curl -s -w '\n%{http_code}'`
+- Ensure proper escaping in test scripts
+- Test curl manually: `curl -v http://secrets-router:8080/healthz`
+
+#### Component Naming Conflicts
+**Symptoms**: "kubernetes already exists" errors in Dapr logs
+**Causes**: Multiple components with same type/metadata
+**Solutions**:
+- Use test-override.yaml to disable conflicting AWS components
+- Ensure unique component names per namespace
+- Clean up test namespaces between test runs
+
+#### Sample Service Restart Issues  
+**Symptoms**: CrashLoopBackOff after successful test completion
+**Causes**: Sample services using "Always" restart policy for one-time tasks
+**Solutions**:
+- Use `restartPolicy: Never` for test runner pods
+- Allows proper "Completed" state transition
+- Prevents unnecessary restart loops
+
+#### Image Pull Policy in Testing
+**Best Practices**:
+- Set `image.pullPolicy: Never` in override files for local images
+- Use local image builds: `docker build -t sample-python:latest ...`
+- Verify images exist: `docker images | grep -E "(secrets-router|sample-)"`
 2. **Update Helm dependencies**: `cd charts/umbrella && helm dependency build`
 3. **Deploy test scenario**: 
    ```bash
