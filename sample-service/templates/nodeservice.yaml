@@ -20,9 +20,9 @@ spec:
         - name: TEST_NAMESPACE
           value: {{ .Release.Namespace | quote }}
         - name: TEST_SECRET_NAME
-          value: "sample-secret"
+          value: {{ .Values.clients.node.env.TEST_SECRET_NAME | quote }}
         - name: TEST_SECRET_KEY
-          value: "password"
+          value: {{ .Values.clients.node.env.TEST_SECRET_KEY | quote }}
       resources:
         {{- toYaml .Values.resources | nindent 8 }}
   terminationGracePeriodSeconds: 0

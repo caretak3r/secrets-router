@@ -1,0 +1,30 @@
+# Test 2: Cross-Namespace Failure Case
+# Minimal override file - ONLY values that differ from base chart defaults
+
+dapr:
+  enabled: false         # Disable Dapr - already installed cluster-wide
+
+secrets-router:
+  image:
+    pullPolicy: Never  # Override base "Always" for local images
+  secretStores:
+    aws:
+      enabled: false   # Override base "true" for K8s-only testing
+    stores:
+      kubernetes-secrets:
+        namespaces:
+          - test-namespace-2
+          - test-namespace-1  # Access secrets from Test 1 namespace
+
+sample-service:
+  clients:
+    python:
+      env:
+        - name: SECRETS_ROUTER_URL
+          value: "http://test-1-secrets-router.test-namespace-1.svc.cluster.local:8080"  # Cross-namespace URL
+        - name: TEST_NAMESPACE
+          value: "test-namespace-1"     # Try to access Test 1 secrets
+    node:
+      enabled: false    # Override base "true" to reduce test complexity
+    bash:
+      enabled: false    # Override base "true" to reduce test complexity

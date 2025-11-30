@@ -1,0 +1,26 @@
+# Test 1: Same Namespace Success Case
+# Minimal override file - ONLY values that differ from base chart defaults
+
+secrets-router:
+  image:
+    pullPolicy: Never  # Override base "Always" for local images
+  secretStores:
+    aws:
+      enabled: false   # Override base "true" for K8s-only testing
+    stores:
+      kubernetes-secrets:
+        namespaces:
+          - test-namespace-1
+
+sample-service:
+  clients:
+    python:
+      env:
+        - name: SECRETS_ROUTER_URL
+          value: "http://test-1-secrets-router.test-namespace-1.svc.cluster.local:8080"  # Different from default
+        - name: TEST_NAMESPACE
+          value: "test-namespace-1"     # Different from default "dapr-control-plane"
+    node:
+      enabled: false    # Override base "true" to reduce test complexity
+    bash:
+      enabled: false    # Override base "true" to reduce test complexity

@@ -1,28 +1,28 @@
-{{- if .Values.clients.node.enabled }}
+{{- if .Values.clients.bash.enabled }}
 ---
 apiVersion: v1
 kind: Pod
 metadata:
-  name: {{ include "sample-service.fullname" . }}-node
+  name: {{ include "sample-service.fullname" . }}-bash
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "sample-service.labels" . | nindent 4 }}
-    app.kubernetes.io/component: node-client
+    app.kubernetes.io/component: bash-client
 spec:
   restartPolicy: {{ .Values.restartPolicy }}
   containers:
-    - name: node-client
-      image: "{{ .Values.clients.node.image }}:{{ .Values.clients.node.tag | default "latest" }}"
-      imagePullPolicy: {{ .Values.clients.node.pullPolicy }}
+    - name: bash-client
+      image: "{{ .Values.clients.bash.image }}:{{ .Values.clients.bash.tag | default "latest" }}"
+      imagePullPolicy: {{ .Values.clients.bash.pullPolicy }}
       env:
         - name: SECRETS_ROUTER_URL
           value: {{ include "sample-service.secretsRouterURL" . | quote }}
         - name: TEST_NAMESPACE
           value: {{ .Release.Namespace | quote }}
         - name: TEST_SECRET_NAME
-          value: "sample-secret"
+          value: {{ .Values.clients.bash.env.TEST_SECRET_NAME | quote }}
         - name: TEST_SECRET_KEY
-          value: "password"
+          value: {{ .Values.clients.bash.env.TEST_SECRET_KEY | quote }}
       resources:
         {{- toYaml .Values.resources | nindent 8 }}
   terminationGracePeriodSeconds: 0

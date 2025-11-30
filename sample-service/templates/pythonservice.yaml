@@ -1,28 +1,28 @@
-{{- if .Values.clients.node.enabled }}
+{{- if .Values.clients.python.enabled }}
 ---
 apiVersion: v1
 kind: Pod
 metadata:
-  name: {{ include "sample-service.fullname" . }}-node
+  name: {{ include "sample-service.fullname" . }}-python
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "sample-service.labels" . | nindent 4 }}
-    app.kubernetes.io/component: node-client
+    app.kubernetes.io/component: python-client
 spec:
   restartPolicy: {{ .Values.restartPolicy }}
   containers:
-    - name: node-client
-      image: "{{ .Values.clients.node.image }}:{{ .Values.clients.node.tag | default "latest" }}"
-      imagePullPolicy: {{ .Values.clients.node.pullPolicy }}
+    - name: python-client
+      image: "{{ .Values.clients.python.image }}:{{ .Values.clients.python.tag | default "latest" }}"
+      imagePullPolicy: {{ .Values.clients.python.pullPolicy }}
       env:
         - name: SECRETS_ROUTER_URL
           value: {{ include "sample-service.secretsRouterURL" . | quote }}
         - name: TEST_NAMESPACE
           value: {{ .Release.Namespace | quote }}
         - name: TEST_SECRET_NAME
-          value: "sample-secret"
+          value: {{ .Values.clients.python.env.TEST_SECRET_NAME | quote }}
         - name: TEST_SECRET_KEY
-          value: "password"
+          value: {{ .Values.clients.python.env.TEST_SECRET_KEY | quote }}
       resources:
         {{- toYaml .Values.resources | nindent 8 }}
   terminationGracePeriodSeconds: 0

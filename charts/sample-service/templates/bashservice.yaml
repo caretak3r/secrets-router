@@ -15,7 +15,14 @@ spec:
       image: "{{ .Values.clients.bash.image }}:{{ .Values.clients.bash.tag | default "latest" }}"
       imagePullPolicy: {{ .Values.clients.bash.pullPolicy }}
       env:
-        {{- toYaml .Values.clients.bash.env | nindent 8 }}
+        - name: SECRETS_ROUTER_URL
+          value: {{ include "sample-service.secretsRouterURL" . | quote }}
+        - name: TEST_NAMESPACE
+          value: {{ .Release.Namespace | quote }}
+        - name: TEST_SECRET_NAME
+          value: "sample-secret"
+        - name: TEST_SECRET_KEY
+          value: "password"
       resources:
         {{- toYaml .Values.resources | nindent 8 }}
   terminationGracePeriodSeconds: 0

@@ -80,24 +80,26 @@ healthChecks:
     enabled: true
     path: /healthz
     port: 8080
-    initialDelaySeconds: 30
-    periodSeconds: 10
+    initialDelaySeconds: 15
+    periodSeconds: 15
+    timeoutSeconds: 3
+    failureThreshold: 3
   readiness:
     enabled: true
     path: /readyz
     port: 8080
-    initialDelaySeconds: 30
+    initialDelaySeconds: 5
     periodSeconds: 5
-    timeoutSeconds: 5
-    failureThreshold: 3
+    timeoutSeconds: 3
+    failureThreshold: 6
   startupProbe:
     enabled: true
     path: /healthz
     port: 8080
-    initialDelaySeconds: 10
-    periodSeconds: 10
-    timeoutSeconds: 5
-    failureThreshold: 30
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 12
 
 # Network policies
 networkPolicy:
