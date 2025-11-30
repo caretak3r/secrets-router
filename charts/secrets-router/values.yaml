@@ -4,7 +4,7 @@
 image:
   repository: secrets-router
   tag: latest
-  pullPolicy: Always
+  pullPolicy: Never
 
 # Service configuration
 service:
@@ -84,8 +84,18 @@ healthChecks:
     enabled: true
     path: /readyz
     port: 8080
-    initialDelaySeconds: 10
+    initialDelaySeconds: 30
     periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 3
+  startupProbe:
+    enabled: true
+    path: /healthz
+    port: 8080
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 30
 
 # Network policies
 networkPolicy:

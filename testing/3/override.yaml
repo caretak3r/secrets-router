@@ -1,0 +1,60 @@
+# Test 3: All clients comprehensive testing
+# Testing all client types with multiple secrets
+
+secrets-router:
+  enabled: true
+  image:
+    pullPolicy: Never  # Use local images
+  dapr:
+    enabled: false  # Disable Dapr for simple testing
+  secretStores:
+    stores:
+      kubernetes-secrets:
+        namespaces:
+          - test-namespace-3
+
+sample-service:
+  enabled: true
+  image:
+    pullPolicy: Never  # Use local images
+  clients:
+    python:
+      enabled: true
+      env:
+        - name: SECRETS_ROUTER_URL
+          value: "http://test-3-secrets-router.test-namespace-3.svc.cluster.local:8080"
+        - name: TEST_SECRET_NAME
+          value: "app-config"
+        - name: TEST_SECRET_KEY
+          value: "database-url"
+        - name: TEST_NAMESPACE
+          value: "test-namespace-3"
+    bash:
+      enabled: true
+      env:
+        - name: SECRETS_ROUTER_URL
+          value: "http://test-3-secrets-router.test-namespace-3.svc.cluster.local:8080"
+        - name: TEST_SECRET_NAME
+          value: "auth-tokens"
+        - name: TEST_SECRET_KEY
+          value: "jwt-secret"
+        - name: TEST_NAMESPACE
+          value: "test-namespace-3"
+    node:
+      enabled: true
+      env:
+        - name: SECRETS_ROUTER_URL
+          value: "http://test-3-secrets-router.test-namespace-3.svc.cluster.local:8080"
+        - name: TEST_SECRET_NAME
+          value: "service-keys"
+        - name: TEST_SECRET_KEY
+          value: "private-key"
+        - name: TEST_NAMESPACE
+          value: "test-namespace-3"
+
+# Disable Dapr for this test scenario
+dapr:
+  enabled: false
+
+global:
+  namespace: test-namespace-3

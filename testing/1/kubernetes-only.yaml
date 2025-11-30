@@ -1,0 +1,55 @@
+# Test 1: Basic functionality - Kubernetes secrets only (no Dapr)
+# Simplified test using direct Kubernetes API access
+
+secrets-router:
+  enabled: true
+  image:
+    pullPolicy: Never  # Use local images
+  dapr:
+    enabled: false  # Disable Dapr completely
+  env:
+    DAPR_HTTP_PORT: "3500"
+    DEBUG_MODE: "false"
+    LOG_LEVEL: "INFO"
+    SERVER_PORT: "8080"
+    AWS_SECRETS_ENABLED: "false"  # Disable AWS for this test
+  deployment:
+    readinessProbe:
+      httpGet:
+        path: /healthz  # Use healthz instead of readyz for this test
+        port: http
+      initialDelaySeconds: 5
+      periodSeconds: 5
+  secretStores:
+    stores:
+      kubernetes-secrets:
+        namespaces:
+          - test-namespace-1
+
+sample-service:
+  enabled: true
+  image:
+    pullPolicy: Never  # Use local images
+  clients:
+    python:
+      enabled: true
+      env:
+        - name: SECRETS_ROUTER_URL
+          value: "http://test-1-secrets-router.test-namespace-1.svc.cluster.local:8080"
+        - name: TEST_SECRET_NAME
+          value: "sample-secret"
+        - name: TEST_SECRET_KEY  
+          value: "password"
+        - name: TEST_NAMESPACE
+          value: "test-namespace-1"
+    bash:
+      enabled: false
+    node:
+      enabled: false
+
+# Disable Dapr for this test scenario
+dapr:
+  enabled: false
+
+global:
+  namespace: test-namespace-1

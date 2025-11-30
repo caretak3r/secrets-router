@@ -10,7 +10,7 @@ service:
 clients:
   node:
     enabled: true
-    image: sample-node-client
+    image: sample-node-service
     pullPolicy: Never
     env:
       - name: SECRETS_ROUTER_URL
@@ -24,7 +24,7 @@ clients:
   
   python:
     enabled: true
-    image: sample-python-client
+    image: sample-python-service
     pullPolicy: Never
     env:
       - name: SECRETS_ROUTER_URL
@@ -38,7 +38,7 @@ clients:
   
   bash:
     enabled: true
-    image: sample-bash-client
+    image: sample-bash-service
     pullPolicy: Never
     env:
       - name: SECRETS_ROUTER_URL

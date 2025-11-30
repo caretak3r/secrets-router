@@ -1,0 +1,44 @@
+# Test 1: Basic functionality with default settings
+# Using Docker Desktop's local image registry for testing
+
+secrets-router:
+  enabled: true
+  image:
+    pullPolicy: Never  # Use local images
+  dapr:
+    enabled: true  # Enable Dapr for proper testing
+  secretStores:
+    aws:
+      enabled: false  # Disable AWS for testing
+    stores:
+      kubernetes-secrets:
+        namespaces:
+          - test-namespace-1
+
+sample-service:
+  enabled: true
+  image:
+    pullPolicy: Never  # Use local images
+  clients:
+    python:
+      enabled: true
+      env:
+        - name: SECRETS_ROUTER_URL
+          value: "http://test-1-secrets-router.test-namespace-1.svc.cluster.local:8080"
+        - name: TEST_SECRET_NAME
+          value: "sample-secret"
+        - name: TEST_SECRET_KEY  
+          value: "password"
+        - name: TEST_NAMESPACE
+          value: "test-namespace-1"
+    bash:
+      enabled: false
+    node:
+      enabled: false
+
+# Enable Dapr for this test scenario
+dapr:
+  enabled: true
+
+global:
+  namespace: test-namespace-1

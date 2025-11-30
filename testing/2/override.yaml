@@ -1,0 +1,53 @@
+# Test 2: Multi-client testing
+# Testing multiple client types accessing secrets router
+
+secrets-router:
+  enabled: true
+  image:
+    pullPolicy: Never  # Use local images
+  dapr:
+    enabled: true  # Enable Dapr for proper testing
+  secretStores:
+    aws:
+      enabled: false  # Disable AWS for testing
+    stores:
+      kubernetes-secrets:
+        namespaces:
+          - test-namespace-2
+
+sample-service:
+  enabled: true
+  image:
+    pullPolicy: Never  # Use local images
+  clients:
+    python:
+      enabled: true
+      env:
+        - name: SECRETS_ROUTER_URL
+          value: "http://test-2-secrets-router.test-namespace-2.svc.cluster.local:8080"
+        - name: TEST_SECRET_NAME
+          value: "api-credentials"
+        - name: TEST_SECRET_KEY
+          value: "api-key"
+        - name: TEST_NAMESPACE
+          value: "test-namespace-2"
+    bash:
+      enabled: true
+      env:
+        - name: SECRETS_ROUTER_URL
+          value: "http://test-2-secrets-router.test-namespace-2.svc.cluster.local:8080"
+        - name: TEST_SECRET_NAME
+          value: "db-credentials"
+        - name: TEST_SECRET_KEY
+          value: "password"
+        - name: TEST_NAMESPACE
+          value: "test-namespace-2"
+    node:
+      enabled: false
+
+# Enable Dapr for this test scenario
+dapr:
+  enabled: true
+
+global:
+  namespace: test-namespace-2

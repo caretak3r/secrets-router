@@ -80,8 +80,8 @@ spec:
             port: {{ .Values.healthChecks.liveness.port }}
           initialDelaySeconds: {{ .Values.healthChecks.liveness.initialDelaySeconds }}
           periodSeconds: {{ .Values.healthChecks.liveness.periodSeconds }}
-          timeoutSeconds: 3
-          failureThreshold: 3
+          timeoutSeconds: {{ .Values.healthChecks.liveness.timeoutSeconds | default 3 }}
+          failureThreshold: {{ .Values.healthChecks.liveness.failureThreshold | default 3 }}
         {{- end }}
         {{- if .Values.healthChecks.readiness.enabled }}
         readinessProbe:
@@ -90,8 +90,18 @@ spec:
             port: {{ .Values.healthChecks.readiness.port }}
           initialDelaySeconds: {{ .Values.healthChecks.readiness.initialDelaySeconds }}
           periodSeconds: {{ .Values.healthChecks.readiness.periodSeconds }}
-          timeoutSeconds: 3
-          failureThreshold: 3
+          timeoutSeconds: {{ .Values.healthChecks.readiness.timeoutSeconds | default 3 }}
+          failureThreshold: {{ .Values.healthChecks.readiness.failureThreshold | default 3 }}
+        {{- end }}
+        {{- if .Values.healthChecks.startupProbe.enabled }}
+        startupProbe:
+          httpGet:
+            path: {{ .Values.healthChecks.startupProbe.path }}
+            port: {{ .Values.healthChecks.startupProbe.port }}
+          initialDelaySeconds: {{ .Values.healthChecks.startupProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.healthChecks.startupProbe.periodSeconds }}
+          timeoutSeconds: {{ .Values.healthChecks.startupProbe.timeoutSeconds | default 5 }}
+          failureThreshold: {{ .Values.healthChecks.startupProbe.failureThreshold | default 30 }}
         {{- end }}
         securityContext:
           allowPrivilegeEscalation: false

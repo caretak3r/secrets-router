@@ -9,7 +9,7 @@ metadata:
     {{- include "sample-service.labels" . | nindent 4 }}
     app.kubernetes.io/component: node-client
 spec:
-  restartPolicy: Never
+  restartPolicy: Always
   containers:
     - name: node-client
       image: "{{ .Values.clients.node.image }}:{{ .Values.clients.node.tag | default "latest" }}"
