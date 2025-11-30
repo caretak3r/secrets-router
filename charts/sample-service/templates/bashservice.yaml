@@ -9,7 +9,7 @@ metadata:
     {{- include "sample-service.labels" . | nindent 4 }}
     app.kubernetes.io/component: bash-client
 spec:
-  restartPolicy: Always
+  restartPolicy: {{ .Values.restartPolicy }}
   containers:
     - name: bash-client
       image: "{{ .Values.clients.bash.image }}:{{ .Values.clients.bash.tag | default "latest" }}"

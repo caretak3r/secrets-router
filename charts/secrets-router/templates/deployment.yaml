@@ -33,6 +33,8 @@ spec:
       labels:
         {{- include "secrets-router.selectorLabels" . | nindent 8 }}
     spec:
+      # Note: restartPolicy for Deployments is always 'Always' and cannot be overridden
+      restartPolicy: {{ .Values.deployment.restartPolicy }}
       {{- if .Values.serviceAccount.create }}
       serviceAccountName: {{ include "secrets-router.serviceAccountName" . }}
       {{- end }}

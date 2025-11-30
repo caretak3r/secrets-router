@@ -4,7 +4,7 @@
 image:
   repository: secrets-router
   tag: latest
-  pullPolicy: Never
+  pullPolicy: Always
 
 # Service configuration
 service:
@@ -15,6 +15,8 @@ service:
 # Deployment configuration
 deployment:
   replicas: 1
+  # Note: restartPolicy for Deployments is always 'Always' - included for completeness
+  restartPolicy: Always
   resources:
     requests:
       cpu: 100m
@@ -111,11 +113,5 @@ secretStores:
   aws:
     enabled: true
     region: us-east-1 # this will be the top-level region for the AWS helper function
-    # Optional: Path prefix for all AWS secrets
-    pathPrefix: ""
-    auth:
-      secretStore: kubernetes
-      # Optional: Additional auth metadata
-      metadata: {}
-      #   accessKey: "AWS_ACCESS_KEY_ID"
-      #   secretKey: "AWS_SECRET_ACCESS_KEY"
+    # Optional: Enable multiple key-value pairs per secret (defaults to false)
+    multipleKeyValuesPerSecret: false
