@@ -55,6 +55,8 @@ spec:
         - name: {{ $key }}
           value: {{ $value | quote }}
         {{- end }}
+        - name: AWS_SECRETS_ENABLED
+          value: "{{ .Values.secretStores.aws.enabled }}"
         - name: NAMESPACE
           valueFrom:
             fieldRef:
@@ -109,4 +111,3 @@ spec:
               audience: sts.amazonaws.com
       {{- end }}
       {{- end }}
-
