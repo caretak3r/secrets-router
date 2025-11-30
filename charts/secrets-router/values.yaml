@@ -108,10 +108,11 @@ ingress:
   enabled: false
 
 # Secret Stores Configuration
+# Kubernetes Secrets are enabled by default
 secretStores:
   # Configuration for AWS Secrets Manager
   aws:
-    enabled: true
+    enabled: false
     region: us-east-1 # this will be the top-level region for the AWS helper function
     # Optional: Enable multiple key-value pairs per secret (defaults to false)
     multipleKeyValuesPerSecret: false

@@ -1,18 +1,108 @@
-# Developer Guide: Consuming Secrets
+# Developer Guide: Consuming Secrets and Testing
 
-This guide shows developers how to configure and consume secrets from the Secrets Router service in their applications.
+This guide shows developers how to configure and consume secrets from the Secrets Router service in their applications, as well as how to test the complete system using the comprehensive test infrastructure.
 
 ## Overview
 
-The Secrets Router service provides a simple HTTP API to fetch secrets from Kubernetes Secrets or AWS Secrets Manager. Secrets can be accessed from **multiple namespaces** - you configure which namespaces are accessible via Helm values in the `control-plane-umbrella` chart.
+The Secrets Router service provides a simple HTTP API to fetch secrets from Kubernetes Secrets or AWS Secrets Manager. Secrets can be accessed from **multiple namespaces** - you configure which namespaces are accessible via Helm values in the `umbrella` chart.
 
 ## Architecture Context
 
-The Secrets Router is deployed as part of the `control-plane-umbrella` Helm chart:
-- **Umbrella Chart**: `control-plane-umbrella` installs Dapr and Secrets Router
+The Secrets Router is deployed as part of the `umbrella` Helm chart:
+- **Umbrella Chart**: `umbrella` installs Dapr, Secrets Router, and optional sample services
 - **Secrets Router Chart**: Has dependency on Dapr, generates Dapr Component resources
 - **Dapr Components**: Configured via `secrets-components.yaml` template from Helm values
 - **Namespace**: All resources use `{{ .Release.Namespace }}` (no hardcoded namespaces)
+
+## Development and Testing Workflow
+
+### 1. Container Build Process
+
+The project includes multiple container images for development and testing:
+
+```bash
+# Build all containers using the Makefile
+make build IMAGE_TAG=latest
+
+# Or build manually:
+# Build secrets-router service
+docker build -t secrets-router:latest -f secrets-router/Dockerfile secrets-router/
+
+# Build sample client containers (for testing)
+docker build -t sample-python:latest -f containers/sample-python/Dockerfile containers/sample-python/
+docker build -t sample-node:latest -f containers/sample-node/Dockerfile containers/sample-node/
+docker build -t sample-bash:latest -f containers/sample-bash/Dockerfile containers/sample-bash/
+```
+
+### 2. Helm Chart Dependencies
+
+The umbrella chart manages dependencies automatically:
+
+```bash
+cd charts/umbrella
+
+# Update Helm dependencies (when Chart.yaml or versions change)
+helm dependency build
+# OR
+helm dependency update
+
+# Verify Chart.lock is updated
+cat Chart.lock
+```
+
+### 3. Test Infrastructure
+
+The project includes comprehensive testing with automated orchestration:
+
+#### Test Scenarios Structure
+```
+testing/
+├── 1/                     # Test 1: Basic functionality
+│   ├── override.yaml      # Minimal overrides for Kubernetes-only testing
+├── 2/                     # Test 2: Multi-namespace access
+├── 3/                     # Test 3: AWS Secrets Manager integration
+```
+
+#### Override File Methodology
+**CRITICAL**: Override files contain ONLY values that differ from base chart defaults. Before creating override.yaml, analyze the base values.yaml files to avoid redundancy.
+
+**Example Analysis:**
+```bash
+# Base secrets-router/values.yaml defaults:
+# image.pullPolicy: "Always" → Override needed: "Never" for local images
+# dapr.enabled: true → No override needed for Dapr testing
+# secretStores.aws.enabled: true → Override needed: false for local testing
+```
+
+**Minimal Override Structure:**
+```yaml
+# testing/1/override.yaml - ONLY values that DIFFER from base charts
+secrets-router:
+  image:
+    pullPolicy: Never  # Override base "Always"
+  secretStores:
+    aws:
+      enabled: false  # Override base "true"
+    stores:
+      kubernetes-secrets:
+        namespaces:
+          - test-namespace-1  # Test-specific configuration
+
+sample-service:
+  clients:
+    python:
+      env:
+        SECRETS_ROUTER_URL: "http://test-1-secrets-router.test-namespace-1.svc.cluster.local:8080"
+        TEST_NAMESPACE: "test-namespace-1"  # Different from default "dapr-control-plane"
+    node:
+      enabled: false  # Override base "true" to disable
+    bash:
+      enabled: false  # Override base "true" to disable
+
+# Dapr control plane configuration
+dapr:
+  enabled: true  # Enable for proper testing
+```
 
 ## Quick Start
 
@@ -536,10 +626,96 @@ volumes:
 password = get_secret("database-credentials", "password", namespace="production")
 ```
 
-## Support
+## Health Check Integration
 
-For issues or questions:
-- Check logs: `kubectl logs -n <namespace> -l app.kubernetes.io/name=secrets-router`
-- Verify Dapr components: `kubectl get components -n <namespace>`
-- Review ADR: See `ADR.md` for architecture details
+The Secrets Router includes comprehensive health check configurations to handle Dapr initialization timing issues:
+
+### Health Check Endpoints
+- **Liveness Probe**: `/healthz` - Basic service health
+- **Readiness Probe**: `/readyz` - Checks Dapr sidecar connectivity
+- **Startup Probe**: `/healthz` with extended failure threshold for Dapr startup
+
+### Health Check Configuration
+```yaml
+# From charts/secrets-router/values.yaml
+healthChecks:
+  liveness:
+    enabled: true
+    path: /healthz
+    initialDelaySeconds: 30
+  readiness:
+    enabled: true
+    path: /readyz
+    initialDelaySeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+  startupProbe:
+    enabled: true
+    path: /healthz
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 30  # Extended for Dapr timing issues
+```
+
+### Health Response Format
+```json
+// /healthz response (HTTP 200)
+{
+  "status": "healthy",
+  "service": "secrets-router",
+  "version": "1.0.0"
+}
+
+// /readyz response (HTTP 200 when ready, 503 when not ready)
+// When Dapr sidecar is connected:
+{
+  "status": "ready",
+  "service": "secrets-router", 
+  "dapr_sidecar": "connected",
+  "version": "1.0.0"
+}
+
+// When Dapr sidecar is not available:
+{
+  "status": "not_ready",
+  "service": "secrets-router",
+  "dapr_sidecar": "disconnected",
+  "error": "Cannot connect to Dapr sidecar"
+}
+```
+
+The startupProbe ensures that containers have adequate time to establish the Dapr sidecar connection before Kubernetes marks them as ready, preventing premature restarts during deployment.
+
+## Deployment and Testing Guide
+
+### Complete Test Workflow
+See [TESTING_WORKFLOW.md](./TESTING_WORKFLOW.md) for comprehensive testing procedures using the automated test orchestrator approach.
+
+### Local Testing Steps
+1. **Build all containers**: `make build IMAGE_TAG=latest`
+2. **Update Helm dependencies**: `cd charts/umbrella && helm dependency build`
+3. **Deploy test scenario**: 
+   ```bash
+   helm upgrade --install test-1 ./charts/umbrella \
+     --create-namespace \
+     --namespace test-namespace-1 \
+     -f testing/1/override.yaml
+   ```
+4. **Validate deployment**:
+   ```bash
+   kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=secrets-router -n test-namespace-1 --timeout=300s
+   kubectl logs -n test-namespace-1 -l app.kubernetes.io/name=secrets-router
+   ```
+
+### Image Pull Policy Best Practices
+- **Development/Testing**: Set `pullPolicy: Never` in override files to use local images
+- **Production**: Use default `pullPolicy: Always` to ensure latest images
+- **Sample Services**: Always use `pullPolicy: Never` for local development
+
+### Restart Policy Considerations
+- **secrets-router**: Uses Deployment resource with `restartPolicy: Always` (standard)
+- **sample-services**: Configurable via Helm values (Pod resources support all restart policies)
+
+The startupProbe with extended failure threshold (30) and health check configurations specifically address Dapr initialization timing issues encountered during pod startup and Dapr sidecar injection.
 

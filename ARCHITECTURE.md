@@ -181,10 +181,68 @@ sequenceDiagram
 - **Framework**: FastAPI
 - **Image**: Distroless Python (~50MB)
 - **Port**: 8080
+- **Health Checks**: Comprehensive probe configuration for Dapr timing
+  - **Liveness Probe**: `/healthz` with 30s initial delay
+  - **Readiness Probe**: `/readyz` with 30s initial delay, checks Dapr sidecar connectivity
+  - **Startup Probe**: `/healthz` with 10s initial delay and 30 failure threshold
 - **Endpoints**:
-  - `GET /healthz` - Health check
-  - `GET /readyz` - Readiness check
+  - `GET /healthz` - Health check (basic service status)
+  - `GET /readyz` - Readiness check (Dapr sidecar connectivity)
   - `GET /secrets/{secret_name}/{secret_key}?namespace={ns}` - Get secret (always decoded)
+
+#### Health Check Architecture
+
+The enhanced health check configuration specifically addresses Dapr initialization timing issues:
+
+```yaml
+# Enhanced health check configuration in charts/secrets-router/values.yaml
+healthChecks:
+  liveness:
+    enabled: true
+    path: /healthz
+    initialDelaySeconds: 30
+    periodSeconds: 10
+  readiness:
+    enabled: true
+    path: /readyz
+    initialDelaySeconds: 30
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 3
+  startupProbe:
+    enabled: true
+    path: /healthz
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 30  # Extended for Dapr timing issues
+```
+
+**Health Check Integration**:
+- **Startup Probe**: Provides extended window (up to 5 minutes) for Dapr sidecar initialization
+- **Readiness Probe**: Verifies Dapr sidecar connectivity before marking service as ready
+- **Response Differentiation**: `/readyz` returns HTTP 503 when Dapr sidecar is disconnected
+- **Dapr Timing Resolution**: Prevents premature container restarts during Dapr sidecar injection
+
+#### Restart Policy Configuration
+
+The service uses appropriate restart policies for different resource types:
+
+- **secrets-router**: Deployment resource with `restartPolicy: Always` (standard for stateless services)
+- **sample-services**: Pod resources with configurable restartPolicy (default: `Always`)
+  - Enables testing with different restart behaviors
+  - Supports development scenarios with `Never` or `OnFailure` policies
+
+**Configuration Example**:
+```yaml
+# From charts/secrets-router/values.yaml
+deployment:
+  replicas: 1
+  restartPolicy: Always  # Standard for Deployment resources
+
+# From charts/sample-service/values.yaml  
+restartPolicy: Always    # Configurable for test scenarios
+```
 
 ### Dapr Components
 
@@ -198,7 +256,7 @@ sequenceDiagram
 - **Format**: Full path (configured in Helm values) or simple name
 - **Auto-decoding**: No (already decoded)
 
-## Deployment Model
+## Deployment Model with Enhanced Health Management
 
 ```mermaid
 graph LR
@@ -207,9 +265,10 @@ graph LR
     end
     
     subgraph "Umbrella Chart Dependencies"
-        UMBRELLA --> DAPR[Dapr Control Plane<br/>dapr-system namespace]
-        UMBRELLA --> ROUTER[Secrets Router<br/>Customer namespace]
-        UMBRELLA --> COMPONENTS[Dapr Components<br/>Customer namespace]
+        UMBRELLA --> DAPR[Dapr Control Plane<br/>dapr-system namespace<br/>enhanced health checks]
+        UMBRELLA --> ROUTER[Secrets Router<br/>Customer namespace<br/>startupProbe: 30 failures]
+        UMBRELLA --> COMPONENTS[Dapr Components<br/>Customer namespace<br/>generated from values]
+        UMBRELLA --> SAMPLE[Sample Services<br/>Testing support<br/>configurable restartPolicy]
     end
     
     subgraph "Customer Namespace"
@@ -217,11 +276,59 @@ graph LR
         ROUTER --> APP2[Application 2]
         COMPONENTS --> K8S[K8s Secrets]
         COMPONENTS --> AWS[AWS Secrets Manager]
+        SAMPLE --> CLIENT1[Python Client]
+        SAMPLE --> CLIENT2[Node.js Client]
     end
     
     style UMBRELLA fill:#4a90e2
     style DAPR fill:#7b68ee
     style ROUTER fill:#50c878
+    style SAMPLE fill:#ffa07a
+```
+
+### Enhanced Deployment Features
+
+#### Health Check Integration
+- **Startup Probe**: Extended failure threshold (30) handles Dapr sidecar timing
+- **Readiness Probe**: Validates Dapr connectivity before accepting traffic
+- **Liveness Probe**: Standard health monitoring with appropriate delays
+- **Service Discovery**: Comprehensive DNS connectivity validation
+
+#### Restart Policy Management
+- **Deployment Resources**: Standard `restartPolicy: Always` for production stability
+- **Pod Resources**: Configurable restartPolicy for test scenarios and debugging
+- **Container Images**: Development vs production pull policies (Never vs Always)
+
+#### Testing Infrastructure Integration
+- **Minimal Override Methodology**: Override files contain only values different from chart defaults
+- **Namespace Isolation**: Each test scenario in isolated namespace
+- **Automated Orchestrator**: Builds containers and manages dependencies efficiently
+- **Health Validation**: StartupProbe allows adequate time for Dapr initialization
+
+### Container Build and Image Management
+
+#### Production Deployment
+```yaml
+# Production image configuration
+secrets-router:
+  image:
+    repository: secrets-router
+    pullPolicy: Always  # Ensure latest images in production
+  deployment:
+    restartPolicy: Always  # Standard for reliability
+```
+
+#### Local Development/Testing
+```yaml
+# Local testing configuration (override.yaml)
+secrets-router:
+  image:
+    pullPolicy: Never  # Use locally built images
+  deployment:
+    restartPolicy: Always  # Standard even for testing
+
+sample-service:
+  restartPolicy: Never  # Optional: prevent restarts during debugging
 ```
 
 ## Security Model

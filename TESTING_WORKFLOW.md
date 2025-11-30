@@ -1,7 +1,18 @@
-# K8s-Secrets-Broker Testing Workflow
+# K8s-Secrets-Broker Testing Workflow with Automated Orchestrator
 
 ## Overview
-This document provides a comprehensive step-by-step testing workflow for the k8s-secrets-broker project from a clean state, including container builds, Helm chart setup, deployment, and end-to-end validation.
+This document provides a comprehensive testing workflow for the k8s-secrets-broker project using the automated test orchestrator approach. The orchestrator manages container builds, Helm chart setup, deployment, and end-to-end validation with minimal override configurations.
+
+## Test Orchestrator Philosophy
+
+The kubernetes-secrets-router-test-orchestrator provides automated end-to-end testing with these key principles:
+
+1. **Container Build Optimization**: Build containers only when source code changes
+2. **Minimal Override Files**: Override files contain ONLY values that differ from base chart defaults
+3. **Helm Dependency Management**: Update dependencies only when source code or templating changes  
+4. **Namespace Isolation**: Each test runs in isolated namespaces
+5. **Health Validation**: Comprehensive health check validation with startupProbe support
+6. **No Chart Modification**: Original Helm charts are preserved unless fixing bugs
 
 ## Prerequisites
 - Docker Desktop with Kubernetes enabled
@@ -9,192 +20,246 @@ This document provides a comprehensive step-by-step testing workflow for the k8s
 - kubectl configured to use Docker Desktop cluster
 - Project root: `/Users/rohit/Documents/questionable/k8s-secrets-broker`
 
-## Step 1: Build All Containers
+## Test Orchestrator Workflow
 
-### 1.1 Build Secrets Router Service
+### Test Scenarios
+
+The orchestrator executes exactly two test scenarios:
+
+#### Test 1: Same Namespace Success Case
+- **Objective**: Deploy secrets-router, Dapr, and sample services in the same namespace
+- **Expected Result**: All services communicate successfully within the shared namespace
+- **Service Discovery**: Uses in-cluster DNS: `<service-name>.<namespace>.svc.cluster.local`
+
+#### Test 2: Cross-Namespace Failure Case  
+- **Objective**: Split deployment across namespaces to demonstrate failure modes
+- **Configuration**: secrets-router and Dapr in one namespace (test-2-router), sample services in another (test-2-clients)
+- **Expected Result**: Cross-namespace communication failures demonstrating namespace scoping requirements
+
+### Critical Override File Methodology
+
+**Before writing override.yaml, ALWAYS analyze base values.yaml files first** to identify the minimal set of required overrides.
+
+#### Analysis Example:
+```bash
+# Base secrets-router/values.yaml defaults:
+- image.pullPolicy: "Always"       # Override needed: "Never" for local images
+- dapr.enabled: true              # No override needed (same value)
+- secretStores.aws.enabled: true  # Override needed: false for testing
+- healthChecks.startupProbe.enabled: true  # No override needed (new feature)
+
+# Base sample-service/values.yaml defaults:
+- clients.*.enabled: true         # Override only if disabling
+- clients.*.image.pullPolicy: "Never"   # No override needed (same value)
+- clients.*.env defaults to dapr-control-plane namespace
+```
+
+#### Minimal Override Structure:
+```yaml
+# ONLY values that DIFFER from base chart defaults
+secrets-router:
+  image:
+    pullPolicy: Never  # Override base "Always"
+  secretStores:
+    aws:
+      enabled: false   # Override base "true"
+    stores:
+      kubernetes-secrets:
+        namespaces:
+          - test-namespace-1  # Test-specific config
+
+sample-service:
+  clients:
+    python:
+      env:
+        SECRETS_ROUTER_URL: "http://test-1-secrets-router.test-namespace-1.svc.cluster.local:8080"  # Different from default
+        TEST_SECRET_NAME: "sample-secret"    # Same as default - could be omitted
+        TEST_NAMESPACE: "test-namespace-1"     # Different from default "dapr-control-plane"
+    node:
+      enabled: false    # Override base "true"
+```
+
+**Principle**: If the value is the same as in the base chart, DO NOT include it in the override.yaml!
+
+## Step 1: Orchestrated Container Building
+
+The test orchestrator optimizes container building by building only when source code has changed:
+
+### 1.1 Build Automation
 ```bash
 cd /Users/rohit/Documents/questionable/k8s-secrets-broker
 
-# Build the secrets-router image
+# The orchestrator detects source changes and builds selectively:
+# Build secrets-router service only if source code changed
 docker build -t secrets-router:latest -f secrets-router/Dockerfile secrets-router/
 
-# Verify the build
-docker images | grep secrets-router
-```
-
-### 1.2 Build Sample Python Client
-```bash
-# Build sample Python client
+# Build sample client containers only if Dockerfiles changed
 docker build -t sample-python:latest -f containers/sample-python/Dockerfile containers/sample-python/
-
-# Verify the build
-docker images | grep sample-python
-```
-
-### 1.3 Build Sample Node.js Client
-```bash
-# Build sample Node.js client
 docker build -t sample-node:latest -f containers/sample-node/Dockerfile containers/sample-node/
-
-# Verify the build
-docker images | grep sample-node
-```
-
-### 1.4 Build Sample Bash Client
-```bash
-# Build sample Bash client
 docker build -t sample-bash:latest -f containers/sample-bash/Dockerfile containers/sample-bash/
 
-# Verify the build
-docker images | grep sample-bash
+# Or use Makefile for all containers
+make build IMAGE_TAG=latest
 ```
 
-## Step 2: Helm Chart Setup and Dependency Management
-
-### 2.1 Chart Structure Overview
-```
-charts/
-├── umbrella/          # Main deployment chart with dependencies
-├── secrets-router/    # Secrets router service chart
-└── sample-service/    # Sample client applications chart
+### 1.2 Build Verification
+```bash
+# Verify all required images exist
+docker images | grep secrets-router
+docker images | grep sample-
 ```
 
-### 2.2 Update Helm Dependencies
+## Step 2: Helm Chart Dependency Management
+
+The orchestrator manages Helm dependencies only when source code or templating changes:
+
+### 2.1 Umbrella Chart Structure
+```
+charts/umbrella/
+├── Chart.yaml        # Dependencies: dapr, secrets-router, sample-service
+├── Chart.lock        # Pinned dependency versions  
+├── values.yaml       # High-level enable/disable flags
+└── templates/        # Umbrella templates
+```
+
+### 2.2 Dependency Updates (Conditional)
 ```bash
 cd /Users/rohit/Documents/questionable/k8s-secrets-broker/charts/umbrella
 
-# Build/update dependencies
+# Only update dependencies if source code or templating changed:
 helm dependency build
-
-# Alternative: update dependencies
+# OR
 helm dependency update
 
-# Verify Chart.lock is updated
+# Verify Chart.lock reflects current dependencies
 cat Chart.lock
 ```
 
-### 2.3 Verify Chart Rendering
+### 2.3 Chart Rendering Verification
 ```bash
 # Test chart rendering without installing
-helm template test-release . --dry-run
+helm template test-release . --dry-run -f testing/1/override.yaml
 
-# Check for any rendering errors
-# Fix any issues discovered in charts before proceeding
+# Check for rendering errors before deployment
 ```
 
-## Step 3: Test Scenarios Setup
+## Step 3: Test Scenario Deployment with Orchestrator
 
-The project includes 3 test scenarios with isolated namespaces:
-- Test 1: Basic functionality (test-namespace-1)
-- Test 2: Multi-namespace access (test-namespace-2)
-- Test 3: AWS Secrets Manager integration (test-namespace-3)
+The orchestrator manages deployment using minimal override configurations:
 
-### 3.1 Test Override Files
-Each test has an `override.yaml` file in `testing/N/` directory with:
-- Secrets router configuration
-- Sample service client enabling/disabling
-- Environment variables for service discovery
-- Namespace isolation
-
-## Step 4: Deployment Workflow
-
-### 4.1 General Deployment Pattern
+### 3.1 Deployment Pattern
 ```bash
-# Template for each test:
+# Template for each test scenario:
 helm upgrade --install <release-name> ./charts/umbrella \
   --create-namespace \
   --namespace <test-namespace> \
   -f testing/<test-number>/override.yaml
 ```
 
-### 4.2 Deploy Test 1: Basic Functionality
+### 3.2 Test 1: Same Namespace Success Case
 ```bash
 cd /Users/rohit/Documents/questionable/k8s-secrets-broker
 
-# Deploy test 1 with Python client only
+# Deploy all services in same namespace with minimal overrides
 helm upgrade --install test-1 ./charts/umbrella \
   --create-namespace \
   --namespace test-namespace-1 \
   -f testing/1/override.yaml
 
-# Wait for deployment (2-3 minutes)
+# Wait for startupProbe to allow Dapr sidecar initialization (up to 5 minutes)
 kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=secrets-router -n test-namespace-1 --timeout=300s
 ```
 
-### 4.3 Deploy Test 2: Multi-namespace Access
+### 3.3 Test 2: Cross-Namespace Demonstration
 ```bash
-# Deploy test 2 with Python and Bash clients
+# Deploy to demonstrate cross-namespace failure modes
 helm upgrade --install test-2 ./charts/umbrella \
   --create-namespace \
   --namespace test-namespace-2 \
   -f testing/2/override.yaml
 
-# Wait for deployment
+# Wait for deployment and observe communication patterns
 kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=secrets-router -n test-namespace-2 --timeout=300s
 ```
 
-### 4.4 Deploy Test 3: AWS Integration (THIS WON'T WORK LOCALLY - so skip for now). 
-```bash
-# Deploy test 3 with all clients
-helm upgrade --install test-3 ./charts/umbrella \
-  --create-namespace \
-  --namespace test-namespace-3 \
-  -f testing/3/override.yaml
+## Step 4: Health Check Validation with Enhanced Probes
 
-# Wait for deployment
-kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=secrets-router -n test-namespace-3 --timeout=300s
+The orchestrator validates deployments using comprehensive health checks that include the new startupProbe configuration:
+
+### 4.1 Enhanced Health Check Configuration
+```yaml
+# Health checks configured in charts/secrets-router/values.yaml:
+healthChecks:
+  liveness:
+    enabled: true
+    path: /healthz
+    initialDelaySeconds: 30
+    periodSeconds: 10
+  readiness:
+    enabled: true
+    path: /readyz
+    initialDelaySeconds: 30
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 3
+  startupProbe:
+    enabled: true
+    path: /healthz
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 30  # Extended for Dapr timing issues
 ```
 
-## Step 5: Validation and Testing
-
-### 5.1 Health Check All Deployments
+### 4.2 Health Status Verification
 ```bash
-# Check all test namespaces
-for ns in test-namespace-1 test-namespace-2 test-namespace-3; do
+# Check all test namespaces and pod status
+for ns in test-namespace-1 test-namespace-2; do
   echo "=== Namespace: $ns ==="
   kubectl get pods -n $ns
   kubectl get services -n $ns
+  # Check pod health status
+  kubectl get pods -n $ns -o wide
 done
 ```
 
-### 5.2 Secrets Router Service Validation
+### 4.3 Secrets Router Service Health Validation
 ```bash
-# Test 1 secrets router
-echo "=== Test 1: Secrets Router Logs ==="
+# Test 1 secrets router health endpoints
+echo "=== Test 1: Secrets Router Health Checks ==="
 kubectl logs -n test-namespace-1 -l app.kubernetes.io/name=secrets-router --tail=50
 
-# Test health endpoint
+# Test health endpoints directly via port-forward
 kubectl port-forward -n test-namespace-1 svc/test-1-secrets-router 8080:8080 &
 sleep 5
+
+# Test liveness endpoint (/healthz)
 curl http://localhost:8080/healthz
-curl http://localhost:8080/readyz  
+
+# Test readiness endpoint (/readyz) - checks Dapr connectivity
+curl http://localhost:8080/readyz
 pkill -f "kubectl port-forward" || true
+
+# Verify startupProbe allowed adequate time for Dapr initialization
+kubectl get pods -n test-namespace-1 -o yaml | grep -A 10 startupProbe
 ```
 
-### 5.3 Client Application Testing
+### 4.4 Client Application Testing and Service Discovery
 ```bash
-# Check Python client logs (Test 1)
-echo "=== Test 1: Python Client Logs ==="
+# Check Python client logs (Test 1) - verify service discovery works
+echo "=== Test 1: Python Client Service Discovery ==="
 kubectl logs -n test-namespace-1 -l app.kubernetes.io/name=sample-service-python --tail=50
 
-# Check Python and Bash client logs (Test 2)
-echo "=== Test 2: Python and Bash Client Logs ==="
-kubectl logs -n test-namespace-2 -l app.kubernetes.io/name=sample-service-python --tail=50
-kubectl logs -n test-namespace-2 -l app.kubernetes.io/name=sample-service-bash --tail=50
-
-# Check all client logs (Test 3)
-echo "=== Test 3: All Client Logs ==="
-kubectl logs -n test-namespace-3 -l app.kubernetes.io/name=sample-service-python --tail=50
-kubectl logs -n test-namespace-3 -l app.kubernetes.io/name=sample-service-bash --tail=50
-kubectl logs -n test-namespace-3 -l app.kubernetes.io/name=sample-service-node --tail=50
-```
-
-### 5.4 Service Discovery and Connectivity Testing
-```bash
-# Test inter-service communication in Test 1
-# Exec into Python client pod and test connection to secrets router
+# Check connectivity from client pods to secrets router
 PYTHON_POD=$(kubectl get pods -n test-namespace-1 -l app.kubernetes.io/name=sample-service-python -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -n test-namespace-1 $PYTHON_POD -- curl -s http://test-1-secrets-router.test-namespace-1.svc.cluster.local:8080/healthz
+kubectl exec -n test-namespace-1 $PYTHON_POD -- \
+  curl -s "http://test-1-secrets-router.test-namespace-1.svc.cluster.local:8080/healthz"
+
+# Test cross-namespace failures in Test 2
+echo "=== Test 2: Cross-Namespace Service Discovery ==="
+PYTHON_POD=$(kubectl get pods -n test-namespace-2 -l app.kubernetes.io/name=sample-service-python -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -n test-namespace-2 $PYTHON_POD -- \
+  curl -s "http://test-2-secrets-router.test-namespace-2.svc.cluster.local:8080/healthz" || echo "Expected failure: Cross-namespace communication"
 ```
 
 ## Step 6: Troubleshooting Guide
@@ -308,18 +373,39 @@ for ns in test-namespace-3; do
 done
 ```
 
-## Success Criteria
-- All containers build successfully
-- Helm charts render without errors
-- All 3 test deployments complete successfully
-- All pods reach Running state with Ready condition
-- Secrets router responds to health checks
-- Sample clients can communicate with secrets router
-- Service discovery works correctly in all test namespaces
-- Secret retrieval functionality works end-to-end
+## Success Criteria with Enhanced Health Validation
 
-## Performance Notes
-- Allow 2-3 minutes per test deployment for pod initialization
-- Dapr sidecar injection adds ~30-60 seconds startup time
-- Image pull policy set to Never to avoid registry delays
-- Use `kubectl wait` commands to automate readiness checks
+- All containers build successfully with source change detection
+- Helm charts render without errors using minimal override configurations
+- Both test deployments complete successfully using the orchestrator approach
+- All pods reach Running status with Ready condition, supported by startupProbe configuration
+- Secrets router responds to health checks (/healthz, /readyz) with proper Dapr connectivity
+- Sample clients can communicate with secrets router using in-cluster DNS
+- Service discovery works correctly in same-namespace scenario (Test 1)
+- Cross-namespace failure modes are properly demonstrated (Test 2)
+- Override files contain only values that differ from base chart defaults
+- Dapr sidecar injection and mTLS establishment verified via readiness probe
+
+## Performance and Health Notes
+
+- Allow 2-5 minutes per test deployment for pod initialization due to startupProbe configuration
+- Dapr sidecar injection adds ~30-60 seconds startup time (addressed by startupProbe with 30 failure threshold)
+- Image pull policy set to Never to avoid registry delays in local testing
+- Use `kubectl wait` commands to automate readiness checks with extended timeouts
+- StartupProbe ensures containers have adequate time for Dapr sidecar connection before Kubernetes marks them as failed
+- Enhanced health checks prevent premature restarts during Dapr initialization
+
+## Orchestrator Benefits
+
+The automated test orchestrator provides these advantages over manual testing:
+
+1. **Optimized Builds**: Containers built only when source changes detected
+2. **Minimal Overrides**: Prevents configuration redundancy by analyzing base chart values
+3. **Dependency Management**: Helm dependencies updated only when templating changes
+4. **Health Focus**: Comprehensive health validation including startupProbe timing
+5. **Namespace Isolation**: Clean test environment separation
+6. **No Chart Pollution**: Original charts preserved unless fixing bugs
+7. **Service Discovery Validation**: Proper DNS connectivity testing
+8. **Failure Mode Documentation**: Clear demonstration of cross-namespace limitations
+
+The orchestrator approach ensures consistent, repeatable testing while maintaining the integrity of the base Helm charts and minimizing configuration overhead.

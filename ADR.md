@@ -1093,7 +1093,560 @@ flowchart TD
 
 ---
 
-## Implementation Roadmap: Short-Term vs Long-Term
+# ADR-002: Enhanced Health Check Configuration for Dapr Timing Issues
+
+## Status
+**Accepted** | Date: 2025-11-30 | Authors: Platform Engineering Team
+
+## Context
+
+During testing and development, we encountered significant issues with Dapr sidecar initialization timing. The standard Kubernetes liveness and readiness probes were not providing adequate time for Dapr sidecars to establish connectivity with the control plane, leading to:
+
+1. **Pod Restart Cycles**: Kubernetes restarting secrets-router pods before Dapr sidecar was ready
+2. **Flaky Deployments**: Inconsistent pod readiness across different environments
+3. **Dapr Connection Failures**: Readiness probe succeeding while Dapr sidecar connectivity was still pending
+4. **Testing Instability**: Test scenarios failing due to timing variations during local development
+
+The existing health check configuration used standard defaults:
+- Liveness/Readiness: 30s initial delay, 10-5s period, 3 failure threshold
+- No startup probe configured
+- Single health endpoint (`/healthz`) for both liveness and readiness
+
+## Decision Drivers
+
+1. **Dapr Timing Variability**: Dapr sidecar injection and Sentry connection establishment varies significantly (30s-5min)
+2. **Production Stability**: Need reliable deployment behavior across all environments
+3. **Testing Repeatability**: Test scenarios must be consistent and reliable
+4. **Service Availability**: Prevent premature pod restarts during Dapr initialization
+5. **Readiness Accuracy**: Service should only accept traffic when Dapr sidecar is connected
+6. **Operational Simplicity**: Solution must work without manual intervention
+7. **Resource Efficiency**: Avoid unnecessary restarts and resource waste
+
+## Considered Options
+
+### Option 1: Extended Initial Delays Only
+```yaml
+# Simple approach: extend existing probe delays
+livenessProbe:
+  initialDelaySeconds: 120  # Extended from 30s
+readinessProbe:
+  initialDelaySeconds: 120  # Extended from 30s
+```
+
+**Pros:**
+- Simple to implement
+- No additional probe endpoints needed
+- Maintains existing health check logic
+
+**Cons:**
+- Fixed delay may be insufficient on slow networks
+- Delays pod readiness even when Dapr is ready faster
+- No graceful failure handling for extended Dapr failures
+- Still single endpoint for both probes
+
+### Option 2: Startup Probe with Enhanced Readiness Check
+```yaml
+# Comprehensive approach with startup probe and differentiated endpoints
+startupProbe:
+  httpGet:
+    path: /healthz
+    port: 8080
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  failureThreshold: 30  # 5 minutes total
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 8080
+  initialDelaySeconds: 30
+readinessProbe:
+  httpGet:
+    path: /readyz  # Different endpoint
+    port: 8080
+  initialDelaySeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+```
+
+**Pros:**
+- Provides extended initialization window specifically for startup
+- Differentiated endpoints allow proper readiness validation
+- Handles Dapr timing variations gracefully
+- Kubernetes won't restart pods during startup window
+- Readiness can fail independently of startup probe
+
+**Cons:**
+- More complex configuration
+- Requires additional endpoint implementation
+- More probe configurations to manage
+
+### Option 3: Dapr-Sidecar-Aware Health Checks
+```yaml
+# Check Dapr sidecar status directly
+readinessProbe:
+  exec:
+    command:
+    - /bin/sh
+    - -c
+    - curl -f http://localhost:3500/v1.0/healthz && curl -f http://localhost:8080/readyz
+```
+
+**Pros:**
+- Direct Dapr sidecar health validation
+- Guarantees Dapr is ready before service is ready
+- Most accurate readiness determination
+
+**Cons:**
+- Tightly couples service to Dapr implementation
+- More complex probe command
+- Debugging difficulty when probe fails
+- Relies on localhost networking
+- Security concerns with exec commands
+
+## Decision Outcome
+
+**Chosen Solution: Option 2 - Startup Probe with Enhanced Readiness Check**
+
+We chose the startup probe with differentiated endpoints approach because it provides the best balance of reliability, simplicity, and operational clarity.
+
+### Implementation Details
+
+#### Enhanced Health Endpoint Behavior
+
+**`/healthz` Endpoint (Basic Service Health):**
+```json
+{
+  "status": "healthy",
+  "service": "secrets-router",
+  "version": "1.0.0"
+}
+```
+
+**`/readyz` Endpoint (Dapr Connectivity Check):**
+```json
+// When Dapr sidecar is connected:
+{
+  "status": "ready",
+  "service": "secrets-router",
+  "dapr_sidecar": "connected",
+  "version": "1.0.0"
+}
+
+// When Dapr sidecar is not available:
+{
+  "status": "not_ready",
+  "service": "secrets-router",
+  "dapr_sidecar": "disconnected",
+  "error": "Cannot connect to Dapr sidecar"
+}
+```
+
+#### Probe Configuration
+```yaml
+# Final configuration in charts/secrets-router/values.yaml
+healthChecks:
+  liveness:
+    enabled: true
+    path: /healthz
+    initialDelaySeconds: 30
+    periodSeconds: 10
+  readiness:
+    enabled: true
+    path: /readyz
+    initialDelaySeconds: 30
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 3
+  startupProbe:
+    enabled: true
+    path: /healthz
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 30  # Extended for Dapr timing issues
+```
+
+## Consequences
+
+### Positive
+
+1. **Deployment Reliability**: Eliminates pod restart cycles during Dapr initialization
+2. **Testing Consistency**: Test deployments are now predictable and repeatable
+3. **Production Readiness**: Service only accepts traffic when fully ready
+4. **Operational Clarity**: Clear distinction between service health and Dapr connectivity
+5. **Graceful Degradation**: Service can have basic health even when Dapr is temporarily unavailable
+6. **Extended Initialization**: Up to 5 minutes for Dapr sidecar connection establishment
+
+### Negative
+
+1. **Increased Complexity**: Three probe configurations vs. previous two
+2. **Additional Endpoint**: Need to maintain both `/healthz` and `/readyz` endpoints
+3. **Longer Startup Time**: Service may take longer to appear "ready" (by design)
+4. **Configuration Overhead**: More probe settings to configure and tune
+
+### Neutral
+
+1. **Resource Impact**: Minimal resource overhead for additional probe
+2. **Monitoring Impact**: Additional health metrics to monitor and alert on
+3. **Debugging Complexity**: Multiple probe states to diagnose during issues
+
+## Implementation Notes
+
+### Service Code Changes
+```python
+# FastAPI endpoint implementations
+@app.get("/healthz")
+async def health_check():
+    """Basic health check - service is running"""
+    return {
+        "status": "healthy",
+        "service": "secrets-router", 
+        "version": "1.0.0"
+    }
+
+@app.get("/readyz")
+async def readiness_check():
+    """Readiness check - service and Dapr sidecar are ready"""
+    # Check Dapr sidecar connectivity
+    dapr_healthy = await check_dapr_connectivity()
+    
+    if dapr_healthy:
+        return {
+            "status": "ready",
+            "service": "secrets-router",
+            "dapr_sidecar": "connected",
+            "version": "1.0.0"
+        }
+    else:
+        return {
+            "status": "not_ready",
+            "service": "secrets-router",
+            "dapr_sidecar": "disconnected",
+            "error": "Cannot connect to Dapr sidecar"
+        }, 503  # HTTP 503 for readiness probe
+```
+
+### Testing Validation
+```bash
+# Validation commands for testing
+kubectl get pods -n <namespace> -o yaml | grep -A 20 startupProbe
+kubectl get pods -n <namespace> -o yaml | grep -A 15 readinessProbe
+kubectl get pods -n <namespace> -o yaml | grep -A 10 livenessProbe
+
+# Test endpoints directly
+kubectl exec -n <namespace> <pod> -- curl http://localhost:8080/healthz
+kubectl exec -n <namespace> <pod> -- curl http://localhost:8080/readyz
+```
+
+### Troubleshooting Guide
+
+**Symptom: Pods stuck in PodInitializing**
+- Check startupProbe logs and timing
+- Verify Dapr sidecar injection is working
+- Review Dapr control plane health
+
+**Symptom: Pods Ready but Not Serving Traffic**
+- Check `/readyz` endpoint response
+- Verify Dapr sidecar connectivity
+- Review Dapr component configuration
+
+**Symptom: Pods Restarting Frequently**
+- Check liveness probe logs
+- Verify `/healthz` endpoint is responding
+- Review pod resource constraints
+
+## Future Considerations
+
+1. **Configuration Tuning**: Monitor performance and adjust failureThreshold/periodSeconds based on production metrics
+2. **Probe Optimization**: Consider probe-specific configurations for different deployment environments
+3. **Metrics Enhancement**: Add detailed metrics for probe timings and Dapr connection establishment
+4. **Alerting Integration**: Configure alerts based on probe failure patterns
+5. **Multi-Environment Support**: Environment-specific probe configurations for development vs. production
+
+---
+
+# ADR-003: Restart Policy Configuration for Testing and Production Scenarios
+
+## Status
+**Accepted** | Date: 2025-11-30 | Authors: Platform Engineering Team
+
+## Context
+
+As the project evolved to include comprehensive testing infrastructure with sample services, we needed to clarify and optimize restart policies for different deployment scenarios:
+
+1. **Production Secrets Router**: Standard stateless service requiring high availability
+2. **Sample Services**: Testing clients that benefit from configurable restart behavior
+3. **Development Environments**: Debugging scenarios where automatic restarts can interfere
+4. **Test Isolation**: Need for different restart behaviors in different test scenarios
+
+The existing configuration used standard deployment defaults with `restartPolicy: Always`, but this didn't provide the flexibility needed for testing and development scenarios.
+
+## Decision Drivers
+
+1. **Production Reliability**: Secrets router must be highly available with automatic restart capability
+2. **Testing Flexibility**: Sample services should support different restart behaviors for test scenarios
+3. **Development Experience**: Local debugging should be enhanced by flexible restart policies
+4. **Resource Management**: Avoid unnecessary restarts during testing and debugging
+5. **Operational Consistency**: Production behavior should remain predictable and stable
+6. **Test Scenario Support**: Different test cases may require different restart behaviors
+7. **Configuration Clarity**: Restart policies should be clearly documented and configurable
+
+## Considered Options
+
+### Option 1: Fixed Restart Policies (Always)
+```yaml
+# All services use restartPolicy: Always
+secrets-router:
+  deployment:
+    restartPolicy: Always
+sample-service:
+  restartPolicy: Always
+```
+
+**Pros:**
+- Simple configuration
+- Consistent behavior across environments
+- Production reliability guaranteed
+
+**Cons:**
+- No flexibility for testing scenarios
+- Debugging interference from automatic restarts
+- Resource waste during controlled tests
+- Can't test restart failure scenarios
+
+### Option 2: Configurable Restart Policies with Production Defaults
+```yaml
+# Default production behavior with override capability
+secrets-router:
+  deployment:
+    restartPolicy: Always  # Fixed for production stability
+sample-service:
+  restartPolicy: Always   # Default, configurable via values
+```
+
+**Pros:**
+- Production secrets router remains reliable
+- Testing flexibility for sample services
+- Clear separation of concerns
+- Supports development scenarios
+
+**Cons:**
+- Requires documentation of restart policy differences
+- More complex configuration management
+- Testing teams need to understand configuration options
+
+### Option 3: Environment-Aware Restart Policies
+```yaml
+# Restart policies based on deployment environment
+global:
+  environment: production|development|testing
+restartPolicy:
+  production: Always
+  development: OnFailure
+  testing: Never
+```
+
+**Pros:**
+- Automatic selection based on environment
+- Simplified deployment experience
+- Clear environmental boundaries
+
+**Cons:**
+- More complex template logic
+- Environment detection reliability concerns
+- Harder to test specific restart behaviors
+- Potential for unexpected behavior changes
+
+## Decision Outcome
+
+**Chosen Solution: Option 2 - Configurable Restart Policies with Production Defaults**
+
+We chose configurable restart policies with fixed production behavior for the secrets router and configurable behavior for sample services.
+
+### Implementation Details
+
+#### Production Secrets Router Configuration
+```yaml
+# charts/secrets-router/values.yaml (production-optimized)
+deployment:
+  replicas: 1
+  restartPolicy: Always  # Fixed for production stability
+  # Note: Deployment resources always use restartPolicy: Always
+  # Configuration included for documentation and consistency
+```
+
+#### Sample Service Configuration
+```yaml
+# charts/sample-service/values.yaml (configurable for testing)
+restartPolicy: Always    # Default, can be overridden in test scenarios
+
+# Test override example:
+# testing/1/override.yaml
+sample-service:
+  restartPolicy: Never   # For debugging scenarios
+```
+
+#### Resource Type Considerations
+
+**Deployment Resources (secrets-router):**
+- Always use `restartPolicy: Always` (Kubernetes requirement)
+- Automatic restart ensures service availability
+- High availability and fault tolerance
+
+**Pod Resources (sample services):**
+- Support all restart policies (`Always`, `OnFailure`, `Never`)
+- Configurable based on testing needs
+- Flexibility for different scenarios
+
+### Override File Examples
+
+#### Production Deployment
+```yaml
+# production-values.yaml
+secrets-router:
+  deployment:
+    restartPolicy: Always  # Standard production behavior
+
+sample-service:
+  enabled: false  # Typically disabled in production
+```
+
+#### Development Testing
+```yaml
+# testing/1/override.yaml (debugging focus)
+sample-service:
+  restartPolicy: Never   # Prevent restarts during debugging
+  clients:
+    python:
+      enabled: true
+```
+
+#### Restart Failure Testing
+```yaml
+# testing/2/override.yaml (failure scenario testing)
+sample-service:
+  restartPolicy: OnFailure  # Test controlled restart scenarios
+  clients:
+    python:
+      enabled: true
+      env:
+        FAILURE_MODE: "enabled"  # Simulate failures
+```
+
+## Consequences
+
+### Positive
+
+1. **Production Stability**: Secrets router maintains high availability with guaranteed restarts
+2. **Testing Flexibility**: Sample services can be configured for different test scenarios
+3. **Development Experience**: Debugging enhanced by controllable restart behavior
+4. **Resource Efficiency**: No unnecessary restarts during controlled testing
+5. **Scenario Support**: Multiple restart behaviors for comprehensive testing
+6. **Configuration Clarity**: Clear separation with documentation
+
+### Negative
+
+1. **Configuration Complexity**: Teams need to understand restart policy differences
+2. **Testing Overhead**: Test designers must consider restart policy configuration
+3. **Documentation Requirements**: Clear documentation needed for different scenarios
+4. **Potential Confusion**: Different behaviors between secrets router and sample services
+
+### Neutral
+
+1. **Maintainability**: Slightly more complex configuration management
+2. **Learning Curve**: New team members need to understand restart policy rationale
+3. **Test Design**: Test scenarios must explicitly consider restart behavior
+
+## Implementation Notes
+
+### Helm Template Integration
+```yaml
+# charts/sample-service/templates/pythonservice.yaml
+{{- if .Values.clients.python.enabled }}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "sample-service.fullname" . }}-python
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sample-service.labels" . | nindent 4 }}
+    app.kubernetes.io/component: python-client
+spec:
+  restartPolicy: {{ .Values.restartPolicy }}  # Configurable
+  containers:
+    - name: python-client
+      image: "{{ .Values.clients.python.image }}:{{ .Values.clients.python.tag | default "latest" }}"
+      imagePullPolicy: {{ .Values.clients.python.pullPolicy }}
+      # ... rest of pod configuration
+{{- end }}
+```
+
+### Testing Workflow Integration
+```bash
+# Test with different restart policies
+helm upgrade --install test-1 ./charts/umbrella \
+  --create-namespace \
+  --namespace test-namespace-1 \
+  -f testing/1/override.yaml  # restartPolicy: Never for debugging
+
+helm upgrade --install test-2 ./charts/umbrella \
+  --create-namespace \
+  --namespace test-namespace-2 \
+  -f testing/2/override.yaml  # restartPolicy: OnFailure for failure testing
+```
+
+### Documentation Requirements
+
+The configuration must be clearly documented:
+1. **README.md**: Basic restart policy descriptions
+2. **DEVELOPER.md**: Development scenario recommendations
+3. **TESTING_WORKFLOW.md**: Testing-specific configurations
+4. **ARCHITECTURE.md**: Production vs testing behavior differences
+
+### Troubleshooting Guide
+
+**Symptom: Pods Not Restarting on Failure**
+- Check if `restartPolicy: Never` is configured
+- Verify intended behavior in test scenario
+- Review override file configuration
+
+**Symptom: Unexpected Pod Restarts During Testing**
+- Check if `restartPolicy: Always` is configured
+- Consider `restartPolicy: OnFailure` for controlled scenarios
+- Review test scenario requirements
+
+**Symptom: Production Environment Instability**
+- Ensure secrets-router uses `restartPolicy: Always`
+- Verify sample services are disabled or properly configured
+- Check for override file contamination
+
+## Best Practices
+
+### Production Deployment
+1. **Always** use `restartPolicy: Always` for secrets-router (Deployment resource)
+2. **Disable** sample services in production environments
+3. **Monitor** pod restart patterns and set appropriate alerts
+
+### Testing Scenarios
+1. **Debugging**: Use `restartPolicy: Never` to investigate failure modes
+2. **Controlled Testing**: Use `restartPolicy: OnFailure` for restart behavior validation
+3. **Stress Testing**: Use `restartPolicy: Always` for high availability verification
+
+### Development Environment
+1. **Early Debugging**: Start with `restartPolicy: Never` for easier debugging
+2. **Integration Testing**: Switch to `restartPolicy: Always` for production-like behavior
+3. **Resource Conservation**: Use `restartPolicy: Never` when actively debugging to save resources
+
+## Future Considerations
+
+1. **Dynamic Configuration**: Consider runtime restart policy configuration through ConfigMaps
+2. **Automated Testing**: Enhance test orchestrator to automatically select appropriate restart policies
+3. **Monitoring Integration**: Add restart policy metrics and alerting
+4. **Documentation Enhancement**: Create decision matrix for restart policy selection
+5. **Template Optimization**: Consider helper templates for restart policy configuration
+
+---
 
 This section outlines the phased approach for implementing the Secrets Broker Service, balancing immediate needs with long-term enhancements.
 

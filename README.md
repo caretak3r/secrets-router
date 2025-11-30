@@ -21,24 +21,58 @@ The Secrets Broker is deployed as an **umbrella Helm chart** that includes:
 
 ## Quick Start
 
-### 1. Install Umbrella Chart
+### Control Plane Umbrella Chart
 
 ```bash
-# Install in your namespace
-helm install secrets-broker ./charts/umbrella \
+# Install the control-plane-umbrella chart (includes Dapr, secrets-router, sample-service)
+helm upgrade --install control-plane ./charts/umbrella \
   --namespace production \
   --create-namespace \
-  --set global.namespace=production
+  -f override.yaml
 ```
 
-### 2. Deploy Dapr Components
+### Override Configuration
+
+Create `override.yaml` to customize the installation:
+
+```yaml
+# override.yaml - Minimal overrides for your environment
+secrets-router:
+  secretStores:
+    aws:
+      enabled: false  # Disable AWS for K8s-only testing
+    stores:
+      kubernetes-secrets:
+        namespaces:
+          - production
+          - shared-services
+  image:
+    pullPolicy: Never  # Use local images for testing
+
+sample-service:
+  enabled: true  # Enable sample clients for testing
+  clients:
+    python:
+      enabled: true
+      env:
+        SECRETS_ROUTER_URL: "http://control-plane-secrets-router.production.svc.cluster.local:8080"
+    node:
+      enabled: false  # Disable if not needed
+    bash:
+      enabled: false  # Disable if not needed
+
+# Note: Dapr control plane deploys to dapr-system namespace automatically
+dapr:
+  enabled: true
+```
+
+### Deploy Dapr Components (Generated Automatically)
+
+The umbrella chart now generates Dapr Component resources automatically from Helm values via `secrets-components.yaml` template. No manual component deployment is required.
 
 ```bash
-# Deploy Kubernetes Secrets component
-kubectl apply -f dapr-components/kubernetes-secrets-component.yaml -n production
-
-# Deploy AWS Secrets Manager component (if using AWS)
-kubectl apply -f dapr-components/aws-secrets-manager-component.yaml -n production
+# Components are automatically created in the release namespace
+kubectl get components -n production
 ```
 
 ### 3. Use in Your Application
@@ -66,7 +100,45 @@ Application → Secrets Router → Dapr Sidecar → Dapr Components → Backend 
 - **Components** fetch from backend stores
 - **Auto-decoding** happens transparently for K8s secrets
 
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for detailed diagrams.
+The project deploys as a **control-plane-umbrella Helm chart** that includes:
+- **Dapr Control Plane**: Provides mTLS and component abstraction
+- **Secrets Router Service**: HTTP API service for fetching secrets
+- **Sample Services**: Optional client applications for testing
+- **Dapr Components**: Kubernetes Secrets and AWS Secrets Manager integrations
+
+## Key Deployment Configuration
+
+### Helm Chart Structure
+```
+control-plane-umbrella (umbrella chart)
+├── dapr (dependency)
+│   └── Dapr control plane components
+├── secrets-router (dependency)
+│   ├── secrets-router service deployment
+│   └── secrets-components.yaml (generates Dapr Component resources)
+└── sample-service (dependency, optional for testing)
+    ├── Python client
+    ├── Node.js client
+    └── Bash client
+```
+
+### Health Check Configuration
+The Secrets Router includes enhanced health check configurations:
+- **Liveness Probe**: `/healthz` endpoint with 30s initial delay
+- **Readiness Probe**: `/readyz` endpoint with 30s initial delay  
+- **Startup Probe**: `/healthz` with 10s initial delay and 30 failure threshold
+  - Addresses Dapr timing issues during pod startup
+  - Ensures service has adequate time to establish Dapr sidecar connection
+
+### Image Pull Policies
+- **secrets-router**: `Always` (production) or `Never` (local testing)
+- **sample-services**: `Never` for local development/testing
+
+### Restart Policy Configuration
+- **secrets-router**: `Always` (standard for Deployment resources)
+- **sample-services**: Configurable via Helm values (default: `Always`)
+
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for detailed diagrams and deployment patterns.
 
 ## Documentation
 
@@ -197,35 +269,72 @@ See [DEVELOPER_GUIDE.md](./DEVELOPER_GUIDE.md) for code examples in:
 ```
 k8s-secrets-broker/
 ├── charts/
-│   ├── umbrella/          # Umbrella chart (Dapr + Secrets Router)
-│   ├── dapr/               # Dapr control plane chart
-│   └── secrets-router/     # Secrets Router service chart
-├── secrets-router/         # Python service implementation
-├── dapr-components/        # Dapr component definitions
+│   ├── umbrella/          # Umbrella chart (Dapr + Secrets Router + Sample Service)
+│   ├── secrets-router/    # Secrets Router service chart
+│   └── sample-service/    # Sample client applications chart
+├── secrets-router/        # Python service implementation
+├── containers/            # Sample client Dockerfiles
+│   ├── sample-python/     # Python client
+│   ├── sample-node/       # Node.js client
+│   └── sample-bash/       # Bash client
+├── testing/               # Test scenarios and override files
+│   ├── 1/                 # Test 1: Basic functionality
+│   ├── 2/                 # Test 2: Multi-namespace access
+│   └── 3/                 # Test 3: AWS integration
 ├── scripts/                # Build and deployment scripts
-└── docs/                   # Documentation
+└── docs/                   # Documentation (ADR.md, ARCHITECTURE.md, etc.)
 ```
 
-## Building
+## Building and Testing
+
+### Container Builds
+
+The project includes both the secrets-router service and sample client containers:
 
 ```bash
-# Build Docker image
-make build
+# Build secrets-router service
+docker build -t secrets-router:latest -f secrets-router/Dockerfile secrets-router/
 
-# Build and push to registry
-make build-push IMAGE_REGISTRY=your-registry.io IMAGE_TAG=v1.0.0
+# Build sample client containers (for testing)
+docker build -t sample-python:latest -f containers/sample-python/Dockerfile containers/sample-python/
+docker build -t sample-node:latest -f containers/sample-node/Dockerfile containers/sample-node/
+docker build -t sample-bash:latest -f containers/sample-bash/Dockerfile containers/sample-bash/
+
+# Or use the Makefile
+make build IMAGE_TAG=latest
 ```
 
-## Deployment
+### Helm Chart Structure
+
+The project uses an umbrella chart with dependencies:
+
+```
+charts/
+├── umbrella/          # Main deployment chart with dependencies
+│   ├── Chart.yaml     # Dependencies on dapr, secrets-router, sample-service
+│   ├── values.yaml    # High-level enable/disable flags
+│   └── Chart.lock     # Pinned dependency versions
+├── secrets-router/    # Secrets router service chart
+│   ├── values.yaml    # Default configurations
+│   └── templates/     # Kubernetes manifests
+└── sample-service/    # Sample client applications chart
+    ├── values.yaml    # Client configurations
+    └── templates/     # Pod templates for Python/Node/Bash clients
+```
+
+### Test Infrastructure
+
+The project includes comprehensive testing workflows with automated test orchestration:
+
+1. **Test Scenarios**: Located in `testing/N/` directories with minimal `override.yaml` files
+2. **Container Builds**: Automated builds for secrets-router and sample services
+3. **Helm Dependencies**: Automatically managed via `helm dependency build`
+4. **Namespace Isolation**: Each test runs in isolated namespaces
+5. **Health Validation**: Comprehensive health check validation with startupProbe support
 
 ```bash
-# Install umbrella chart
-helm install secrets-broker ./charts/umbrella \
-  --namespace production \
-  --create-namespace
-
-# Deploy Dapr components
-kubectl apply -f dapr-components/ -n production
+# Run tests using the test orchestrator approach
+# See TESTING_WORKFLOW.md for complete procedures
 ```
 
 ## Troubleshooting
