@@ -1,0 +1,67 @@
+# Sample service configuration for testing secrets-router
+replicaCount: 3
+
+# Service for the sample pods
+service:
+  type: ClusterIP
+  port: 80
+
+# Sample clients to deploy
+clients:
+  node:
+    enabled: true
+    image: sample-node-client
+    pullPolicy: Never
+    env:
+      - name: SECRETS_ROUTER_URL
+        value: "http://secrets-router.dapr-control-plane.svc.cluster.local:8080"
+      - name: TEST_SECRET_NAME
+        value: "sample-secret"
+      - name: TEST_SECRET_KEY
+        value: "password"
+      - name: TEST_NAMESPACE
+        value: "dapr-control-plane"
+  
+  python:
+    enabled: true
+    image: sample-python-client
+    pullPolicy: Never
+    env:
+      - name: SECRETS_ROUTER_URL
+        value: "http://secrets-router.dapr-control-plane.svc.cluster.local:8080"
+      - name: TEST_SECRET_NAME
+        value: "sample-secret"
+      - name: TEST_SECRET_KEY
+        value: "password"
+      - name: TEST_NAMESPACE
+        value: "dapr-control-plane"
+  
+  bash:
+    enabled: true
+    image: sample-bash-client
+    pullPolicy: Never
+    env:
+      - name: SECRETS_ROUTER_URL
+        value: "http://secrets-router.dapr-control-plane.svc.cluster.local:8080"
+      - name: TEST_SECRET_NAME
+        value: "sample-secret"
+      - name: TEST_SECRET_KEY
+        value: "password"
+      - name: TEST_NAMESPACE
+        value: "dapr-control-plane"
+
+resources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+
+# Kubernetes secret to create for testing
+testSecret:
+  name: sample-secret
+  data:
+    password: dGVzdC1wYXNzd29yZA==  # base64 encoded "test-password"
+    username: dGVzdC11c2Vy  # base64 encoded "test-user"
+    database: dGVzdC1kYg==  # base64 encoded "test-db"

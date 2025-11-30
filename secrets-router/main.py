@@ -1,14 +1,7 @@
 #!/usr/bin/env python3
 """
 Secrets Router Service - Dapr-based secrets broker
-Fetches secrets from Dapr components via HTTP requests to sidecar
-
-Architecture:
-- Deployed as part of control-plane-umbrella Helm chart
-- Dapr Components are generated from secrets-components.yaml template
-- Supports secrets from multiple namespaces (configured via Helm values)
-- Namespace is determined from Release.Namespace in Helm templates
-- Applications specify namespace as query parameter in API calls
+Fetches secrets from Dapr secret stores (AWS, Kubernetes) with priority fallback.
 """
 
 import os
@@ -50,7 +43,7 @@ logger.info(f"Service version: {SERVICE_VERSION}")
 
 
 class SecretsRouter:
-    """Routes secret requests to Dapr secret store components with priority fallback"""
+    """Routes secret requests to Dapr secret stores with AWS → K8s priority fallback"""
     
     def __init__(self, http_client: httpx.AsyncClient, aws_enabled: bool):
         self.http_client = http_client
@@ -60,29 +53,28 @@ class SecretsRouter:
         self,
         secret_name: str,
         secret_key: str,
-        namespace: str
+        namespace: Optional[str] = None
     ) -> Dict[str, str]:
         """
-        Get secret from Dapr secret stores in priority order.
-        Priority: AWS Secrets Manager (if enabled) -> Kubernetes Secrets
+        Get secret from Dapr secret stores with AWS → K8s priority fallback.
         
         Args:
             secret_name: Name of the secret
             secret_key: Key within the secret
-            namespace: Kubernetes namespace (required for K8s store)
+            namespace: Kubernetes namespace (optional, defaults to secret store's defaultNamespace)
         
         Returns:
             Dict with backend, secret_name, secret_key, and decoded value
         """
         errors = []
         
-        # 1. Try AWS Secrets Manager first (if enabled)
+        # If no namespace provided, omit the metadata.namespace parameter
+        # to use the defaultNamespace configured in the secret store
+        namespace_param = f"?metadata.namespace={namespace}" if namespace else ""
         if self.aws_enabled:
             store_name = "aws-secrets-manager"
             try:
                 logger.debug(f"Trying {store_name} for {secret_name}")
-                # For AWS, use secret_name as-is
-                # Path prefix is handled by Dapr component metadata
                 url = f"/v1.0/secrets/{store_name}/{secret_name}"
                 
                 response = await self.http_client.get(url)
@@ -110,10 +102,8 @@ class SecretsRouter:
         # 2. Fallback to Kubernetes Secrets
         store_name = "kubernetes"
         try:
-            logger.debug(f"Trying {store_name} for {secret_name} in namespace {namespace}")
-            # For Kubernetes secrets API: use metadata.namespace parameter
-            # URL: /v1.0/secrets/kubernetes/secret_name?metadata.namespace=...
-            url = f"/v1.0/secrets/{store_name}/{secret_name}?metadata.namespace={namespace}"
+            logger.debug(f"Trying {store_name} for {secret_name} in namespace {namespace or 'default'}")
+            url = f"/v1.0/secrets/{store_name}/{secret_name}{namespace_param}"
             
             response = await self.http_client.get(url)
             
@@ -121,39 +111,20 @@ class SecretsRouter:
                 secret_data = response.json()
                 
                 if secret_key in secret_data:
-                    # Decode K8s secrets (base64 encoded by K8s API sometimes, but Dapr might decode? 
-                    # Actually Dapr secrets API returns values as-is from K8s secret data (which are base64 encoded in K8s, 
-                    # but Dapr usually decodes them or passes them. K8s store docs say "retrieves secrets...". 
-                    # If using secretstores.kubernetes, Dapr returns the value. 
-                    # Typically K8s secrets are base64 in the manifest, but Dapr API might return them decoded or encoded.
-                    # The previous implementation assumed they needed decoding if coming from K8s.
-                    # We will keep the safe decode logic.)
+                    # Kubernetes secrets are base64 encoded, decode them
                     value = secret_data[secret_key]
-                    
-                    # Try to decode if it looks like base64
                     try:
-                        # Check if it's a string first
-                        if isinstance(value, str):
-                            # In previous code we just blinded tried to decode.
-                            # Dapr's Kubernetes secret store returns the raw data bytes as string, 
-                            # usually it is NOT double-base64 encoded. K8s API returns base64, Dapr decodes it?
-                            # Dapr docs say: "The Kubernetes secret store component... retrieves secrets."
-                            # Let's stick to safe behavior: try decode, if fail use raw.
-                            # However, if it's already plain text, b64decode might fail or produce garbage.
-                            # Let's assume the previous logic was correct for the environment.
-                            # But wait, K8s secrets ARE base64'd. Dapr usually handles the retrieval.
-                            # If Dapr returns the decoded value, we shouldn't double decode.
-                            # Most Dapr secret stores return the *value*.
-                            pass
-                    except Exception:
-                        pass
+                        decoded_value = base64.b64decode(value).decode('utf-8')
+                    except (TypeError, ValueError, UnicodeDecodeError):
+                        # If decoding fails, use original value
+                        decoded_value = value
                         
                     logger.info(f"Found secret '{secret_name}' in {store_name}")
                     return {
                         "backend": store_name,
                         "secret_name": secret_name,
                         "secret_key": secret_key,
-                        "value": value
+                        "value": decoded_value
                     }
                 else:
                     logger.warning(f"Key '{secret_key}' not in secret '{secret_name}' from {store_name}")
@@ -192,10 +163,7 @@ router = SecretsRouter(dapr_client, AWS_SECRETS_ENABLED)
 
 @app.get("/healthz", status_code=200)
 async def health_check():
-    """
-    Liveness probe endpoint.
-    Returns HTTP 200 if the service process is running.
-    """
+    """Liveness probe - returns HTTP 200 if service is running."""
     return {
         "status": "healthy",
         "service": "secrets-router",
@@ -205,14 +173,9 @@ async def health_check():
 
 @app.get("/readyz")
 async def readiness_check():
-    """
-    Readiness probe endpoint.
-    Returns HTTP 200 only if the service is ready to receive traffic.
-    Checks Dapr sidecar connectivity and basic operations.
-    """
+    """Readiness probe - returns HTTP 200 when service and Dapr sidecar are ready."""
     try:
-        # Check if Dapr sidecar is reachable by testing the components endpoint
-        # Dapr provides metadata at /v1.0/metadata to confirm it's running
+        # Check Dapr sidecar availability via metadata endpoint
         health_url = f"{DAPR_HTTP_ENDPOINT}/v1.0/metadata"
         async with httpx.AsyncClient(timeout=2.0) as client:
             response = await client.get(health_url)
@@ -224,7 +187,6 @@ async def readiness_check():
                     "version": SERVICE_VERSION
                 }
             else:
-                # Dapr sidecar not responding correctly
                 logger.warning(f"Dapr sidecar metadata check returned {response.status_code}")
                 raise HTTPException(
                     status_code=503,
@@ -236,7 +198,6 @@ async def readiness_check():
                     }
                 )
     except httpx.RequestError as e:
-        # Cannot connect to Dapr sidecar
         logger.warning(f"Cannot connect to Dapr sidecar: {e}")
         raise HTTPException(
             status_code=503,
@@ -266,31 +227,30 @@ async def readiness_check():
 async def get_secret(
     secret_name: str,
     secret_key: str,
-    namespace: str = Query(..., description="Kubernetes namespace where secret exists (required)")
+    namespace: str = Query(None, description="Kubernetes namespace where secret exists (optional, defaults to secret store default)")
 ):
     """
-    Get secret value from Dapr secret stores.
-    
-    Tries stores in priority order (AWS Secrets Manager (if enabled) → Kubernetes Secrets).
+    Get secret value from Dapr secret stores with AWS → K8s priority fallback.
     Returns decoded values ready for application use.
     
     Args:
         secret_name: Name of the secret
         secret_key: Key within the secret
-        namespace: Kubernetes namespace where the secret exists (required)
+        namespace: Kubernetes namespace where the secret exists (optional)
     
     Returns:
         JSON with backend, secret_name, secret_key, and decoded value
     
     Example:
         GET /secrets/database-credentials/password?namespace=production
+        GET /secrets/database-credentials/password
     """
     try:
         result = await router.get_secret(secret_name, secret_key, namespace)
         
         logger.info(
             f"Secret access: {secret_name}/{secret_key} "
-            f"namespace={namespace} backend={result['backend']}"
+            f"namespace={namespace or 'default'} backend={result['backend']}"
         )
         
         return result

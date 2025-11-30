@@ -1,0 +1,1 @@
+{"name": "sample-node-client", "version": "1.0.0", "description": "Node.js sample client for secrets-router testing", "main": "app.js", "scripts": {"start": "node app.js"}, "dependencies": {"axios": "^1.6.0"}}

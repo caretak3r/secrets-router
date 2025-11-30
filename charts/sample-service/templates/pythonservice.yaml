@@ -1,0 +1,22 @@
+{{- if .Values.clients.python.enabled }}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "sample-service.fullname" . }}-python
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sample-service.labels" . | nindent 4 }}
+    app.kubernetes.io/component: python-client
+spec:
+  restartPolicy: Never
+  containers:
+    - name: python-client
+      image: "{{ .Values.clients.python.image }}:{{ .Values.clients.python.tag | default "latest" }}"
+      imagePullPolicy: {{ .Values.clients.python.pullPolicy }}
+      env:
+        {{- toYaml .Values.clients.python.env | nindent 8 }}
+      resources:
+        {{- toYaml .Values.resources | nindent 8 }}
+  terminationGracePeriodSeconds: 0
+{{- end }}

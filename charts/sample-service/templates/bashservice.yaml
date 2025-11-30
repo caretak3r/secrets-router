@@ -1,0 +1,22 @@
+{{- if .Values.clients.bash.enabled }}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "sample-service.fullname" . }}-bash
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sample-service.labels" . | nindent 4 }}
+    app.kubernetes.io/component: bash-client
+spec:
+  restartPolicy: Never
+  containers:
+    - name: bash-client
+      image: "{{ .Values.clients.bash.image }}:{{ .Values.clients.bash.tag | default "latest" }}"
+      imagePullPolicy: {{ .Values.clients.bash.pullPolicy }}
+      env:
+        {{- toYaml .Values.clients.bash.env | nindent 8 }}
+      resources:
+        {{- toYaml .Values.resources | nindent 8 }}
+  terminationGracePeriodSeconds: 0
+{{- end }}

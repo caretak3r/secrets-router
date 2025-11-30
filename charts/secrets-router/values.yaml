@@ -4,7 +4,7 @@
 image:
   repository: secrets-router
   tag: latest
-  pullPolicy: IfNotPresent
+  pullPolicy: Always
 
 # Service configuration
 service:
@@ -14,7 +14,7 @@ service:
 
 # Deployment configuration
 deployment:
-  replicas: 2
+  replicas: 1
   resources:
     requests:
       cpu: 100m
@@ -32,7 +32,7 @@ dapr:
   logLevel: info
   enableApiLogging: false
   metrics:
-    enabled: true
+    enabled: false
   tracing:
     enabled: false
 
@@ -43,7 +43,7 @@ env:
   DAPR_HTTP_PORT: "3500"
   SERVER_PORT: "8080"
   # Service version
-  SERVICE_VERSION: "v0.0.1"
+  SERVICE_VERSION: "0.0.1"
   
   # AWS Secrets Manager secret paths (optional)
   # Configure full paths for AWS secrets in this section
@@ -100,7 +100,7 @@ secretStores:
   # Configuration for AWS Secrets Manager
   aws:
     enabled: true
-    region: us-east-1
+    region: us-east-1 # this will be the top-level region for the AWS helper function
     # Optional: Path prefix for all AWS secrets
     pathPrefix: ""
     auth:

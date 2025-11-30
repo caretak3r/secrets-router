@@ -1,5 +1,5 @@
 apiVersion: v2
-name: control-plane-umbrella
+name: control-plane
 description: Control Plane Umbrella Chart (Dapr + Secrets Router)
 type: application
 version: 1.0.0
@@ -10,7 +10,7 @@ dependencies:
     repository: "https://dapr.github.io/helm-charts/"
     condition: dapr.enabled
   - name: secrets-router
-    version: "1.0.0"
+    version: "1.0.1"
     repository: "file://../secrets-router"
     condition: secrets-router.enabled
 

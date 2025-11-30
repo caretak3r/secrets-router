@@ -1,0 +1,22 @@
+{{- if .Values.clients.node.enabled }}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "sample-service.fullname" . }}-node
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sample-service.labels" . | nindent 4 }}
+    app.kubernetes.io/component: node-client
+spec:
+  restartPolicy: Never
+  containers:
+    - name: node-client
+      image: "{{ .Values.clients.node.image }}:{{ .Values.clients.node.tag | default "latest" }}"
+      imagePullPolicy: {{ .Values.clients.node.pullPolicy }}
+      env:
+        {{- toYaml .Values.clients.node.env | nindent 8 }}
+      resources:
+        {{- toYaml .Values.resources | nindent 8 }}
+  terminationGracePeriodSeconds: 0
+{{- end }}

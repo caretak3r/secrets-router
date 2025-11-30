@@ -10,7 +10,7 @@
 # Child charts use their default values.yaml configurations unless overridden.
 # See charts/secrets-router/values.yaml for available configuration options.
 
-# Dapr Control Plane Configuration
+# Dapr Control Plane Configuration (keep default naming)
 dapr:
   enabled: true
 
