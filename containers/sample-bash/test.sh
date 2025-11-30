@@ -20,7 +20,7 @@ test_endpoint() {
     echo "📋 Testing: $description"
     echo "Requesting: GET $url"
     
-    if response=$(curl -s -w "\n%{http_code}" "$url"); then
+    if response=$(curl -s -w '\n%{http_code}' "$url"); then
         http_code=$(echo "$response" | tail -n1)
         body=$(echo "$response" | sed '$d')
         
