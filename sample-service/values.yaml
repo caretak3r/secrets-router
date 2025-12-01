@@ -1,7 +1,8 @@
 # Sample service configuration for testing secrets-router
-replicaCount: 3
+# This configuration is designed to be used with the umbrella chart
+# Service teams provide their secrets under their service section in umbrella values.yaml
 
-# Pod restart policy for sample services
+replicaCount: 3
 restartPolicy: Always
 
 # Service for the sample pods
@@ -9,49 +10,30 @@ service:
   type: ClusterIP
   port: 80
 
-# Sample clients to deploy
-clients:
-  node:
-    enabled: true
-    image: sample-node-service
-    pullPolicy: Never
-    env:
-      - name: SECRETS_ROUTER_URL
-        value: "http://secrets-router.dapr-control-plane.svc.cluster.local:8080"
-      - name: TEST_SECRET_NAME
-        value: "sample-secret"
-      - name: TEST_SECRET_KEY
-        value: "password"
-      - name: TEST_NAMESPACE
-        value: "dapr-control-plane"
-  
+# Secrets router configuration
+secretsRouter:
+  url: "http://secrets-router.dapr-control-plane.svc.cluster.local:8080"
+  namespace: "dapr-control-plane"
+
+# Sample clients to deploy - these will be enabled/disabled from umbrella chart
+client:
   python:
     enabled: true
     image: sample-python-service
     pullPolicy: Never
-    env:
-      - name: SECRETS_ROUTER_URL
-        value: "http://secrets-router.dapr-control-plane.svc.cluster.local:8080"
-      - name: TEST_SECRET_NAME
-        value: "sample-secret"
-      - name: TEST_SECRET_KEY
-        value: "password"
-      - name: TEST_NAMESPACE
-        value: "dapr-control-plane"
-  
+    secrets: {}  # Will be populated from umbrella chart values
+   
+  node:
+    enabled: true
+    image: sample-node-service
+    pullPolicy: Never
+    secrets: {}  # Will be populated from umbrella chart values
+    
   bash:
     enabled: true
     image: sample-bash-service
     pullPolicy: Never
-    env:
-      - name: SECRETS_ROUTER_URL
-        value: "http://secrets-router.dapr-control-plane.svc.cluster.local:8080"
-      - name: TEST_SECRET_NAME
-        value: "sample-secret"
-      - name: TEST_SECRET_KEY
-        value: "password"
-      - name: TEST_NAMESPACE
-        value: "dapr-control-plane"
+    secrets: {}  # Will be populated from umbrella chart values
 
 resources:
   limits:
@@ -61,7 +43,7 @@ resources:
     cpu: 50m
     memory: 64Mi
 
-# Kubernetes secret to create for testing
+# Kubernetes secret to create for testing (fallback)
 testSecret:
   name: sample-secret
   data:
