@@ -1,6 +1,39 @@
-# Test 1: Same Namespace Success Case
-# ONLY values that DIFFER from base chart defaults
+# Test Scenario 1: New Secrets Configuration Structure
+# Testing the new subchart-level secrets configuration approach
+# Using Kubernetes secrets only (no AWS)
+
+# Override values that differ from base charts
+dapr:
+  enabled: false      # Disable Dapr dependency to avoid CRD conflicts
 
 secrets-router:
+  enabled: true
   image:
-    pullPolicy: Never  # Override base "Always" for local images
+    pullPolicy: Never  # Override base "Always" for local testing
+  dapr:
+    enabled: false    # Disable Dapr sidecar for secrets-router
+  secretStores:
+    aws:
+      enabled: false   # Override base enabled=true to disable AWS
+    
+sample-service:
+  enabled: true
+  image:
+    pullPolicy: Never  # Override base "Always" for local testing  
+  restartPolicy: Never  # Override base "Always" for one-time tests
+  
+  # Configure new secrets structure
+  secrets:
+    # Map secret reference names to actual Kubernetes secret names
+    rds-credentials: "k8s-rds-credentials"
+    api-keys: "k8s-api-keys" 
+    redis-password: "k8s-redis-password"
+  
+  clients:
+    python:
+      enabled: true    # Keep enabled (same as base)
+      # Environment variables will be auto-generated based on secrets configuration
+    node:
+      enabled: false   # Disable to avoid duplicate testing
+    bash:
+      enabled: false   # Disable to avoid duplicate testing

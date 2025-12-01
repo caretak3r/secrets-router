@@ -23,6 +23,12 @@ spec:
           value: "sample-secret"
         - name: TEST_SECRET_KEY
           value: "password"
+        {{- if .Values.secrets }}
+        {{- range $secretKey, $secretPath := .Values.secrets }}
+        - name: SECRET_{{ $secretKey | upper | replace "-" "_" }}
+          value: {{ $secretPath | quote }}
+        {{- end }}
+        {{- end }}
       resources:
         {{- toYaml .Values.resources | nindent 8 }}
   terminationGracePeriodSeconds: 0

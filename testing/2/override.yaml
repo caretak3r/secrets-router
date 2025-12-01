@@ -1,6 +1,0 @@
-# Test 2: Cross-Namespace Testing
-# Use existing secrets-router from test-1, deploy sample services in test-2-clients namespace
-secrets-router:
-  enabled: false
-dapr:
-  enabled: false
