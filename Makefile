@@ -1,4 +1,4 @@
-.PHONY: help build build-push deploy setup clean test lint
+.PHONY: help build build-push deploy setup clean test lint docker-build-all helm-package charts-dependencies
 
 # Variables
 IMAGE_NAME ?= secrets-router
@@ -68,4 +68,32 @@ k8s-port-forward: ## Port forward to secrets-router service
 k8s-uninstall: ## Uninstall secrets-router and Dapr
 	@helm uninstall secrets-router -n $(NAMESPACE) || true
 	@helm uninstall dapr -n dapr-system || true
+
+# Docker build targets
+docker-build-all: ## Build all Docker containers (secrets-router and sample services)
+	@echo "Building secrets-router image..."
+	@./scripts/build-image.sh $(IMAGE_TAG) $(IMAGE_REGISTRY)
+	@echo "Building sample-bash image..."
+	@cd containers/sample-bash && docker build -t sample-bash:$(IMAGE_TAG) .
+	@echo "Building sample-python image..."
+	@cd containers/sample-python && docker build -t sample-python:$(IMAGE_TAG) .
+	@echo "Building sample-node image..."
+	@cd containers/sample-node && docker build -t sample-node:$(IMAGE_TAG) .
+	@echo "All Docker images built successfully!"
+
+# Helm chart targets
+charts-dependencies: ## Update dependencies for all Helm charts
+	@echo "Updating Helm chart dependencies..."
+	@cd charts/secrets-router && helm dependency update
+	@cd charts/sample-service && helm dependency update
+	@cd charts/umbrella && helm dependency update
+	@echo "Helm dependencies updated!"
+
+helm-package: ## Package all Helm charts
+	@echo "Packaging Helm charts..."
+	@mkdir -p dist/charts
+	@cd charts/secrets-router && helm package . -d ../../dist/charts
+	@cd charts/sample-service && helm package . -d ../../dist/charts
+	@cd charts/umbrella && helm package . -d ../../dist/charts
+	@echo "Helm charts packaged successfully in dist/charts!"
 
