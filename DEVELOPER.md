@@ -46,52 +46,51 @@ sample-service-bash:
 
 ### 3. Access Secrets in Your Application
 
-Your applications can now access secrets using the automatically generated environment variables:
+Your applications access secrets via HTTP requests to the secrets-router service. The secret names are configured in the umbrella values.yaml:
 
 ```python
 import os
 import requests
 
-def get_secret(secret_path: str, secret_key: str = "value") -> str:
-    """Get secret value from Secrets Router using environment-provided configuration."""
+def get_secret(secret_name: str, secret_key: str = "value") -> str:
+    """Get secret value from Secrets Router."""
     secrets_router_url = os.getenv("SECRETS_ROUTER_URL")
     namespace = os.getenv("TEST_NAMESPACE")
     
-    url = f"{secrets_router_url}/secrets/{secret_path}/{secret_key}"
+    url = f"{secrets_router_url}/secrets/{secret_name}/{secret_key}"
     response = requests.get(url, params={"namespace": namespace})
     return response.json()["value"]
 
-# Example using configured secrets
+# Example usage with secret names from umbrella values.yaml
 def get_database_credentials():
-    """Get RDS credentials using the configured secret path."""
-    rds_secret_path = os.getenv("SECRET_RDS_CREDENTIALS")
-    if not rds_secret_path:
-        raise ValueError("SECRET_RDS_CREDENTIALS not configured")
+    """Get RDS credentials using the secret name from configuration."""
+    # For Kubernetes secret named "rds-credentials"
+    if not get_secret("rds-credentials", "host"):
+        raise ValueError("Secret 'rds-credentials' not found")
     
-    # For Kubernetes secrets (single key)
-    if not rds_secret_path.startswith("/"):
-        return {
-            "host": get_secret(f"{rds_secret_path}", "host"),
-            "username": get_secret(f"{rds_secret_path}", "username"), 
-            "password": get_secret(f"{rds_secret_path}", "password"),
-            "database": get_secret(f"{rds_secret_path}", "database")
-        }
-    # For AWS Secrets Manager (JSON)
-    else:
-        import json
-        secret_json = get_secret(rds_secret_path, "value")
-        return json.loads(secret_json)
+    return {
+        "host": get_secret("rds-credentials", "host"),
+        "username": get_secret("rds-credentials", "username"), 
+        "password": get_secret("rds-credentials", "password"),
+        "database": get_secret("rds-credentials", "database")
+    }
+
+# For AWS Secrets Manager secret at "/aws/prod/api-keys"
+def get_api_keys():
+    """Get API keys from AWS Secrets Manager."""
+    import json
+    secret_json = get_secret("/aws/prod/api-keys", "value")
+    return json.loads(secret_json)
 
 # Usage
-db_creds = get_database_credentials()
-print(f"Connecting to {db_creds['host']} as {db_creds['username']}")
-
-# Alternative direct approach for individual secrets
-available_secrets = os.getenv("AVAILABLE_SECRETS", "").split(",")
-for secret_key in available_secrets:
-    secret_path = os.getenv(f"SECRET_{secret_key.upper().replace('-', '_')}")
-    secret_value = get_secret(secret_path)
-    print(f"{secret_key}: {secret_value}")
+try:
+    db_creds = get_database_credentials()
+    print(f"Connecting to database: {db_creds['database']}")
+    
+    api_keys = get_api_keys()
+    print(f"Retrieved {len(api_keys)} API keys")
+except Exception as e:
+    print(f"Error accessing secret: {e}")
 ```
 
 ## API Endpoint
@@ -151,35 +150,14 @@ secrets-router:
 
 ### Service Configuration
 
-The umbrella chart automatically sets up environment variables for each service based on their secrets configuration:
+The umbrella chart sets up each service with just the essential environment variables:
 
-#### Environment Variables Generated
+#### Environment Variables
 
-For each service, the following environment variables are automatically created:
+Each service receives only these core environment variables:
 
 - `SECRETS_ROUTER_URL`: URL of the secrets router service
 - `TEST_NAMESPACE`: Kubernetes namespace where secrets are stored
-- `SECRET_<SECRET_KEY>`: Path/name for each configured secret (normalized to uppercase with underscores)
-- `AVAILABLE_SECRETS`: Comma-separated list of all available secret keys
-
-#### Example Environment Variables
-
-If you configure:
-
-```yaml
-sample-service-python:
-  secrets:
-    rds-credentials: "prod-rds-credentials"
-    api-keys: "/aws/secrets/api-keys"
-```
-
-The Python service will receive these environment variables:
-
-- `SECRETS_ROUTER_URL=http://secrets-router.dapr-control-plane.svc.cluster.local:8080`
-- `TEST_NAMESPACE=dapr-control-plane`
-- `SECRET_RDS_CREDENTIALS=prod-rds-credentials`
-- `SECRET_API_KEYS=/aws/secrets/api-keys`
-- `AVAILABLE_SECRETS=rds-credentials,api-keys`
 
 #### Service Configuration Examples
 
@@ -188,15 +166,15 @@ The Python service will receive these environment variables:
 sample-service-python:
   enabled: true
   secrets:
-    rds-credentials: "prod-db-credentials"           # Kubernetes secret
-    api-keys: "/aws/production/api-keys"             # AWS Secrets Manager
+    rds-credentials: "prod-db-credentials"           # Kubernetes secret name
+    api-keys: "/aws/production/api-keys"             # AWS Secrets Manager path
   
 # Node service with mixed secret sources
 sample-service-node:
   enabled: true
   secrets:
-    redis-password: "redis-cluster-prod"            # Kubernetes secret
-    jwt-secret: "/prod/auth/jwt-secret"             # AWS Secrets Manager
+    redis-password: "redis-cluster-prod"            # Kubernetes secret name
+    jwt-secret: "/prod/auth/jwt-secret"             # AWS Secrets Manager path
 
 # Bash service with shell credentials
 sample-service-bash:
@@ -205,6 +183,8 @@ sample-service-bash:
     rds-credentials: "prod-db-credentials"
     shell-password: "/ops/shell/secrets"
 ```
+
+Services make HTTP requests to the secrets-router using the secret names configured above. The secrets-router will find and return the secret values from the appropriate backend (Kubernetes secrets or AWS Secrets Manager).
 
 ## Build Commands
 
@@ -222,51 +202,13 @@ make docker-build-samples
 make helm-package
 ```
 
-## Sample Service Environment Variables
-
-When you deploy the sample services through the umbrella chart, they receive the following environment variables automatically:
-
-### Python Service
-```bash
-# Generated from umbrella values.yaml
-SECRETS_ROUTER_URL=http://secrets-router.dapr-control-plane.svc.cluster.local:8080
-TEST_NAMESPACE=dapr-control-plane
-SECRET_RDS_CREDENTIALS=your-rds-secret-name
-SECRET_API_KEYS=your-api-keys-secret-name
-AVAILABLE_SECRETS=rds-credentials,api-keys
-```
-
-### Node Service  
-```bash
-SECRETS_ROUTER_URL=http://secrets-router.dapr-control-plane.svc.cluster.local:8080
-TEST_NAMESPACE=dapr-control-plane
-SECRET_RDS_CREDENTIALS=your-rds-secret-name
-SECRET_REDIS_PASSWORD=your-redis-secret-name
-AVAILABLE_SECRETS=rds-credentials,redis-password
-```
-
-### Bash Service
-```bash
-SECRETS_ROUTER_URL=http://secrets-router.dapr-control-plane.svc.cluster.local:8080
-TEST_NAMESPACE=dapr-control-plane
-SECRET_RDS_CREDENTIALS=your-rds-secret-name
-SECRET_SHELL_PASSWORD=your-shell-secret-name
-AVAILABLE_SECRETS=rds-credentials,shell-password
-```
-
 ## Troubleshooting
 
 ### Secret Not Found (404)
 1. Check if secret exists: `kubectl get secret my-secret -n dapr-control-plane`
 2. Verify namespace is configured in `secretStores.stores.kubernetes-secrets.namespaces`
-3. Check that secret paths match exactly between your values.yaml and environment variables
+3. Check that secret names match exactly between your values.yaml and application code
 4. Upgrade helm release with updated configuration
-
-### Environment Variables Not Set
-1. Verify service is enabled in umbrella values: `sample-service-python.enabled: true`
-2. Check that secrets are configured under the correct service section
-3. Use `kubectl exec -it <pod> -- env | grep SECRET` to examine environment variables
-4. Ensure secrets are not empty strings in your values override
 
 ### Connection Issues
 ```bash

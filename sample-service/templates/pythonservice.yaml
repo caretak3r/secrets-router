@@ -19,21 +19,6 @@ spec:
           value: {{ .Values.secretsRouter.url | quote }}
         - name: TEST_NAMESPACE
           value: {{ .Values.secretsRouter.namespace | quote }}
-        {{- if .Values.client.python.secrets }}
-        {{- $availableSecrets := list }}
-        {{- range $secretKey, $secretPath := .Values.client.python.secrets }}
-        {{- $availableSecrets = append $availableSecrets $secretKey }}
-        - name: SECRET_{{ $secretKey | upper | replace "-" "_" }}
-          value: {{ $secretPath | quote }}
-        {{- end }}
-        - name: AVAILABLE_SECRETS
-          value: {{ join "," $availableSecrets | quote }}
-        {{- else }}
-        - name: TEST_SECRET_NAME
-          value: {{ .Values.testSecret.name | quote }}
-        - name: TEST_SECRET_KEY
-          value: "password"
-        {{- end }}
       resources:
         {{- toYaml .Values.resources | nindent 8 }}
   terminationGracePeriodSeconds: 0
