@@ -1,6 +1,6 @@
 # Kubernetes Secrets Broker
 
-A Dapr-based secrets broker service that provides a simple HTTP API for applications to fetch secrets from Kubernetes Secrets and AWS Secrets Manager.
+A Dapr-based secrets broker service that provides a simple HTTP API for applications to fetch secrets from Kubernetes Secrets within the same namespace.
 
 ## Architecture Overview
 
@@ -22,8 +22,7 @@ graph TB
         end
         
         subgraph "Secret Storage"
-            K8S[Kubernetes Secrets<br/>Namespace-scoped]
-            AWS[AWS Secrets Manager<br/>Cloud Storage]
+            K8S[Kubernetes Secrets<br/>Same namespace as services]
         end
     end
     
@@ -35,20 +34,18 @@ graph TB
     class App1,App2,App3 app
     class SR router
     class DS,DC dapr
-    class K8S,AWS storage
+    class K8S storage
     
     App1 -.->|"1. HTTP Request<br/>GET /secrets/{name}/{key}"| SR
     App2 -.->|"1. HTTP Request<br/>GET /secrets/{name}/{key}"| SR  
     App3 -.->|"1. HTTP Request<br/>GET /secrets/{name}/{key}"| SR
     
-    SR -->|"2. Dapr Invoke<br/>GET /secret/{store}/{name}"| DS
-    DS -->|"3. Component Lookup<br/>kubernetes-secrets<br/>aws-secrets-manager"| DC
+    SR -->|"2. Dapr Invoke<br/>GET /secret/kubernetes-secrets/{name}"| DS
+    DS -->|"3. Component Lookup<br/>kubernetes-secrets"| DC
     
-    DC -->|"4a. Fetch<br/>Namespace-scoped"| K8S
-    DC -->|"4b. Fetch<br/>Cloud storage"| AWS
+    DC -->|"4. Fetch<br/>Namespace-scoped"| K8S
     
-    K8S -->|"5a. Return<br/>Auto-decoded"| DS
-    AWS -->|"5b. Return<br/>JSON payload"| DS
+    K8S -->|"5. Return<br/>Auto-decoded"| DS
     
     DS -->|"6. Response<br/>Plain text"| SR
     SR -->|"7. HTTP Response<br/>JSON with secret value"| App1
@@ -62,9 +59,9 @@ The Secrets Broker follows a simple 7-step flow for secret retrieval:
 
 1. **Application Request** - Applications make HTTP requests to the Secrets Router service
 2. **Dapr Invoke** - Secrets Router uses Dapr's secret management API via the sidecar
-3. **Component Resolution** - Dapr resolves which secret store component to use (Kubernetes or AWS)
-4. **Backend Access** - Dapr fetches the secret from the configured backend store
-5. **Data Return** - Backend returns secret data (auto-decoded for K8s, JSON for AWS)
+3. **Component Resolution** - Dapr uses the Kubernetes secrets component
+4. **Backend Access** - Dapr fetches the secret from Kubernetes Secrets
+5. **Data Return** - Kubernetes returns secret data (auto-decoded from base64)
 6. **Sidecar Response** - Dapr sidecar returns the secret to Secrets Router
 7. **HTTP Response** - Secrets Router returns a clean JSON response to the application
 
@@ -82,12 +79,12 @@ The Secrets Broker follows a simple 7-step flow for secret retrieval:
 
 ### ⚡ **Production-Ready**
 - **High Availability**: Dapr provides resilience and failover
-- **Multi-Backend**: Support for both Kubernetes Secrets and AWS Secrets Manager
+- **Kubernetes-Native**: Direct integration with Kubernetes Secrets API
 - **Umbrella Chart**: Single Helm deployment with all dependencies
 
 ### 🔧 **Operationally Simple**
-- **Zero Configuration**: Same-namespace deployments work out of the box
-- **Cross-Namespace**: Manual configuration supported for complex scenarios
+- **Zero Configuration**: Single namespace deployment works out of the box
+- **Namespace Isolation**: Secrets are automatically scoped to deployment namespace
 - **Health Monitoring**: Built-in health checks and readiness probes
 
 ## Quick Start
@@ -129,9 +126,6 @@ Customize your deployment by creating an `override.yaml` file:
 ```yaml
 # Production configuration example
 secrets-router:
-  secretStores:
-    aws:
-      enabled: true  # Enable AWS Secrets Manager
   image:
     pullPolicy: Always  # Production setting
 
@@ -139,7 +133,7 @@ secrets-router:
 sample-service-python:
   secrets:
     rds-credentials: "production-db-credentials"    # Kubernetes secret name
-    api-keys: "/aws/production/api-keys"              # AWS Secrets Manager path
+    api-keys: "production-api-keys"                  # Kubernetes secret name
 
 sample-service-node:
   secrets:
@@ -149,7 +143,7 @@ sample-service-node:
 sample-service-bash:
   secrets:
     rds-credentials: "production-db-credentials"
-    shell-password: "/ops/shell/secrets"
+    shell-password: "shell-credentials"
 ```
 
 ## Application Integration
@@ -171,7 +165,7 @@ def get_secret(secret_name: str, secret_key: str = "value") -> str:
 
 # Usage examples using secret names from umbrella chart configuration
 database_password = get_secret("rds-credentials", "password")
-api_key_secret = get_secret("/aws/production/api-keys")  # AWS Secrets Manager path
+api_key_secret = get_secret("production-api-keys")  # Kubernetes secret
 ```
 
 ### Environment Variables
@@ -238,19 +232,16 @@ GET /readyz   # Readiness probe
 }
 ```
 
-## Cross-Namespace Access
+## Secret Access Patterns
 
-The Secrets Router prioritizes same-namespace deployments (works automatically). For cross-namespace scenarios, manual configuration is required:
+The Secrets Router only supports same-namespace deployments for simplicity and security:
 
 ```bash
-# Same-namespace (automatic)
+# Standard access (automatic)
 curl "http://secrets-router:8080/secrets/db-secret/password?namespace=production"
 
-# Cross-namespace (manual URL configuration)
-curl "http://secrets-router.shared-secrets.svc.cluster.local:8080/secrets/db-secret/password?namespace=shared-secrets"
+# All secrets must be in the same namespace as the deployed services
 ```
-
-For cross-namespace deployments, manually set the `SECRETS_ROUTER_URL` environment variable in your application configuration.
 
 ## Configuration
 
@@ -269,17 +260,14 @@ control-plane-umbrella (umbrella chart)
     └── Bash client
 ```
 
-### Secret Storage Backends
+### Secret Backend
 
 **Kubernetes Secrets**
-- **Location**: Same namespace as your application
+- **Location**: Same namespace as your application and Secrets Router
 - **Format**: Standard Kubernetes secret objects
 - **Auto-Decoding**: Yes (base64 → plain text)
-
-**AWS Secrets Manager**
-- **Location**: AWS Secrets Manager
-- **Format**: Configurable paths (e.g., `/app/secrets/production/database`)
-- **Auto-Decoding**: No (already plain text)
+- **Namespace Isolation**: Secrets are scoped to single namespace deployment
+- **Simplicity**: No additional configuration required
 
 ## Documentation
 

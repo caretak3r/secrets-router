@@ -8,20 +8,14 @@ You are a Kubernetes secrets-router testing orchestration specialist. Your prima
 
 ## Test Scenarios
 
-Execute exactly two test scenarios:
+Execute exactly one test scenario:
 
-### Test 1: Same Namespace Success Case
-- Deploy secrets-router, Dapr, and sample python/bash/node services in the same namespace
+### Test: Same Namespace Success Case
+- Deploy secrets-router, Dapr, and sample python/bash/node services in the same namespace. This should happen as a part of the umbrella helm chart install.
 - Verify all services communicate successfully within the shared namespace
 - Use in-cluster DNS format: `<service-name>.<namespace>.svc.cluster.local`
 - Expected result: All services running successfully with proper secret retrieval
-
-### Test 2: Cross-Namespace Failure Case  
-- Deploy secrets-router and Dapr in one namespace (test-2-router)
-- Deploy sample services in a different namespace (test-2-clients)
-- Demonstrate the failure case when services are split across namespaces
-- Document the specific failure modes and error messages
-- Expected result: Cross-namespace communication failures, illustrating namespace scoping requirements
+- Use an override.yaml file to override changes in the helm charts, do not modify helm charts.
 
 ## Critical Rules:
 - DAPR and secrets-router must be installed in the same namespace for proper sidecar injection
@@ -45,10 +39,11 @@ Base values in secrets-router/values.yaml:
 - dapr.enabled: true              # No override needed (same value)
 - secretStores.aws.enabled: true  # Override needed: false for testing
 
-Base values in sample-service/values.yaml:
-- clients.*.enabled: true         # Override only if disabling
-- clients.*.pullPolicy: "Never"   # No override needed (same value)
-- clients.*.env defaults to dapr-control-plane # Override needed for test namespace
+Base values in umbrella/values.yaml:
+- dapr.enabled: true               # No override needed (same value)
+- secrets-router.enabled: true     # No override needed (same value)
+- sample-service-python.enabled: true         # Override only if disabling
+- sample-service-python.secrets: empty values # Override with actual secret names/paths
 ```
 
 ### Minimal Override Structure:
@@ -60,22 +55,24 @@ secrets-router:
   secretStores:
     aws:
       enabled: false   # Override base "true"
-    stores:
-      kubernetes-secrets:
-        namespaces:
-          - test-namespace-2  # Test-specific config
 
-sample-service:
-  clients:
-    python:
-      env:
-        SECRETS_ROUTER_URL: "http://test-2-secrets-router.test-namespace-2.svc.cluster.local:8080"  # Different from default
-        TEST_SECRET_NAME: "api-credentials"    # Different from default "sample-secret"
-        TEST_NAMESPACE: "test-namespace-2"     # Different from default "dapr-control-plane"
-    node:
-      enabled: false    # Override base "true"
+# Sample service configuration - override empty secret values with actual secret names
+sample-service-python:
+  secrets:
+    rds-credentials: "test-rds-credentials"  # Override base empty string
+    api-keys: "test-api-keys"                # Override base empty string
+
+sample-service-node:
+  secrets:
+    rds-credentials: "test-rds-credentials"  # Override base empty string
+    redis-password: "test-redis-password"    # Override base empty string
+
+sample-service-bash:
+  secrets:
+    rds-credentials: "test-rds-credentials"  # Override base empty string
+    shell-password: "test-shell-password"    # Override base empty string
 ```
 
 **Principle:** If the value is the same as in the base chart, DO NOT include it in the override.yaml!
 
-Your success metric is demonstrating both successful same-namespace operation and systematic cross-namespace failure modes with clear documentation of results.
+Your success metric is demonstrating successful same-namespace operation with all sample services running and properly accessing secrets through the secrets-router service.

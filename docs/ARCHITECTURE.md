@@ -5,7 +5,7 @@
 The Secrets Broker is deployed as a **control-plane-umbrella Helm chart** that includes:
 - **Dapr Control Plane**: Provides mTLS and component abstraction (installed as a dependency)
 - **Secrets Router Service**: HTTP API service that routes secret requests to Dapr components (installed as a dependency)
-- **Dapr Components**: Configurable secret store components (Kubernetes Secrets and AWS Secrets Manager) generated from Helm values
+- **Dapr Components**: Kubernetes Secrets component generated from Helm values
 
 ## Chart Structure
 
@@ -192,12 +192,12 @@ sequenceDiagram
 - Example: Configure `database-credentials: "/app/secrets/production/database-credentials"` in Helm values
 - Allows flexible secret path management
 
-### 5. Priority-Based Resolution
+### 5. Kubernetes Secrets Resolution
 
-- Tries Kubernetes Secrets first (faster, local)
-- Falls back to AWS Secrets Manager if not found
-- Configurable via `SECRET_STORE_PRIORITY` environment variable
-- Default: `kubernetes-secrets,aws-secrets-manager`
+- Uses Kubernetes Secrets API for secure secret storage
+- Namespace-scoped access for isolation and security
+- Automatic base64 decoding before returning to applications
+- Configured via component values during deployment
 
 ## Component Details
 
@@ -274,13 +274,9 @@ restartPolicy: Always    # Configurable for test scenarios
 
 #### Kubernetes Secrets Component
 - **Type**: `secretstores.kubernetes`
-- **Format**: `{namespace}/{secret-name}`
+- **Format**: `{secret-name}` (namespace from deployment)
 - **Auto-decoding**: Yes (base64 → plain text)
-
-#### AWS Secrets Manager Component
-- **Type**: `secretstores.aws.secretsmanager`
-- **Format**: Full path (configured in Helm values) or simple name
-- **Auto-decoding**: No (already decoded)
+- **Namespace Isolation**: Secrets only accessible from same namespace
 
 ## Deployment Model with Enhanced Health Management
 

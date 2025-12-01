@@ -4,129 +4,81 @@ Quick guide for developers consuming secrets from the Secrets Router service.
 
 ## Prerequisite: Create Your Secrets
 
-**Important**: You must create your secrets before deploying the Helm chart. The Secrets Router service retrieves existing secrets but does not create them.
+**Important**: You must create your Kubernetes secrets in the same namespace where you'll deploy the Secrets Router before installing the Helm chart. The Secrets Router service retrieves existing secrets but does not create them.
 
-### For Kubernetes Secrets
+### Create Kubernetes Secrets
 
-If you're storing secrets in Kubernetes, create them first:
+Create your secrets in the namespace where you'll deploy the Secrets Router:
 
 ```bash
 # 1. Create your namespace (if it doesn't exist)
-kubectl create namespace my-namespace
+kubectl create namespace production
 
-# 2. Create Kubernetes secrets in your namespace
+# 2. Create Kubernetes secrets in the same namespace
 kubectl create secret generic rds-credentials \
   --from-literal=host=db.example.com \
   --from-literal=username=admin \
   --from-literal=password=secretpassword \
   --from-literal=database=production \
-  -n my-namespace
+  -n production
 
 kubectl create secret generic api-keys \
   --from-literal=key1=value1 \
   --from-literal=key2=value2 \
-  -n my-namespace
+  -n production
 
 # 3. Verify secrets exist
-kubectl get secrets -n my-namespace
+kubectl get secrets -n production
 ```
 
-### For AWS Secrets Manager
-
-If you're using AWS Secrets Manager, create the secrets in AWS first:
-
-```bash
-# Example using AWS CLI
-aws secretsmanager create-secret \
-  --name "/aws/prod/api-keys" \
-  --secret-string '{"key1":"value1","key2":"value2"}' \
-  --region us-east-1
-
-# Example database credentials
-aws secretsmanager create-secret \
-  --name "prod-db-credentials" \
-  --secret-string '{"host":"db.example.com","username":"admin","password":"secretpassword","database":"production"}' \
-  --region us-east-1
-```
-
-### Secret Store Configuration
-
-**No Additional Configuration Required**: You do not need to configure a secret store in Kubernetes. The Secrets Router automatically supports both:
-- **Kubernetes Secrets**: Access secrets within the same namespace
-- **AWS Secrets Manager**: Access secrets using AWS IAM roles or credentials
-
-The Secrets Router will automatically determine the appropriate backend based on the secret path/name provided in your configuration.
+**Key Point**: All secrets must exist in the same namespace where you deploy the Secrets Router and your applications.
 
 ## Quick Start
 
 ### 1. Prepare Your Configuration
 
-In your `values.yaml` override file, reference the secrets you created:
+In your `values.yaml` override file, reference the Kubernetes secrets you created:
 
 ```yaml
-# For Python service - reference your actual secret names/paths
+# For Python service - reference your actual secret names
 sample-service-python:
   enabled: true
   secrets:
     rds-credentials: "rds-credentials"           # Kubernetes secret name you created
-    api-keys: "/aws/prod/api-keys"              # AWS Secrets Manager path you created
+    api-keys: "api-keys"                        # API keys secret you created
 
-# For Node service
+# For Node service  
 sample-service-node:
   enabled: true
   secrets:
-    rds-credentials: "rds-credentials"           # Same Kubernetes secret (can be reused)
-    redis-password: "redis-credentials"           # Different secret name
+    rds-credentials: "rds-credentials"           # Same secret (can be reused)
+    redis-password: "redis-credentials"         # Different secret
 
 # For Bash service
 sample-service-bash:
   enabled: true
   secrets:
-    rds-credentials: "rds-credentials"           # Same secret reused across services
-    shell-password: "shell-credentials"         # Shell access credentials
+    rds-credentials: "rds-credentials"           # Reused across services
+    shell-password: "shell-credentials"         # Shell access secret
 ```
 
 **Key Points:**
-- **Secret Values**: Use the actual secret names (Kubernetes) or paths (AWS) you created in the prerequisite steps
-- **Secret Keys**: These are reference names for your application code
+- **Secret Name**: Use the exact Kubernetes secret name you created
+- **Reference Keys**: These are names your application code will use
 - **Reuse Allowed**: Multiple services can reference the same secret
+- **Namespace**: All secrets must be in the same namespace as the Secrets Router
 
 ### 2. Deploy Secrets Router
 
 ```bash
 # Build and deploy
 make docker-build-all
-helm install my-release ./charts/umbrella --create-namespace -n my-namespace -f your-values.yaml
+helm install my-release ./charts/umbrella --create-namespace -n production -f your-values.yaml
 ```
 
-### 3. Define Your Service Secrets (Optional Override)
+### 3. Access Secrets in Your Application
 
-You can also define secrets directly in an override file instead of the umbrella values.yaml:
-
-```yaml
-# Test configuration using secrets you created
-sample-service-python:
-  enabled: true
-  secrets:
-    rds-credentials: "rds-credentials"      # Actual Kubernetes secret you created
-    api-keys: "/aws/prod/api-keys"         # Actual AWS Secrets Manager path you created
-
-sample-service-node:  
-  enabled: true
-  secrets:
-    rds-credentials: "rds-credentials"      # Reuse same secret
-    redis-password: "redis-credentials"     # Different secret
-
-sample-service-bash:
-  enabled: true
-  secrets:
-    rds-credentials: "rds-credentials"      # Same secret referenced by multiple services
-    shell-password: "shell-credentials"     # Shell access secret
-```
-
-### 4. Access Secrets in Your Application
-
-Your applications access secrets via HTTP requests to the secrets-router service. The secret names are configured in the umbrella values.yaml:
+Your applications access secrets via HTTP requests to the secrets-router service. Use the secret names you configured in the values.yaml:
 
 ```python
 import os
@@ -144,7 +96,6 @@ def get_secret(secret_name: str, secret_key: str = "value") -> str:
 # Example usage with secret names from umbrella values.yaml
 def get_database_credentials():
     """Get RDS credentials using the secret name from configuration."""
-    # For Kubernetes secret named "rds-credentials"
     if not get_secret("rds-credentials", "host"):
         raise ValueError("Secret 'rds-credentials' not found")
     
@@ -155,12 +106,9 @@ def get_database_credentials():
         "database": get_secret("rds-credentials", "database")
     }
 
-# For AWS Secrets Manager secret at "/aws/prod/api-keys"
 def get_api_keys():
-    """Get API keys from AWS Secrets Manager."""
-    import json
-    secret_json = get_secret("/aws/prod/api-keys", "value")
-    return json.loads(secret_json)
+    """Get API keys from Kubernetes secret."""
+    return get_secret("api-keys", "value")
 
 # Usage
 try:
@@ -168,7 +116,7 @@ try:
     print(f"Connecting to database: {db_creds['database']}")
     
     api_keys = get_api_keys()
-    print(f"Retrieved {len(api_keys)} API keys")
+    print(f"Retrieved API keys")
 except Exception as e:
     print(f"Error accessing secret: {e}")
 ```
@@ -216,33 +164,11 @@ kubectl exec -it <pod> -n my-namespace -- \
 
 ### Secret Store Setup
 
-**No Manual Configuration Required**: The Secrets Router automatically detects and uses the appropriate secret store based on how you reference your secrets:
+**No Manual Configuration Required**: The Secrets Router automatically accesses Kubernetes secrets in the same namespace where your services are deployed.
 
-- **Kubernetes Secrets**: When you reference a secret name (e.g., `"rds-credentials"`)
-  - Automatically looks for Kubernetes secrets in your deployment namespace
-  - No additional configuration needed
-
-- **AWS Secrets Manager**: When you reference a path (e.g., `"/aws/prod/api-keys"`)
-  - Automatically routes to AWS Secrets Manager
-  - Uses IAM roles or configured AWS credentials
-  - No additional configuration needed
-
-### Optional Namespace Configuration (Advanced)
-
-If you need to access Kubernetes secrets in multiple namespaces from a single deployment, you can specify additional namespaces:
-
-```yaml
-secrets-router:
-  secretStores:
-    stores:
-      kubernetes-secrets:
-        namespaces:
-          - my-namespace          # Default deployment namespace (always included)
-          - shared-secrets        # Additional namespace for shared secrets
-          - configuration         # Configuration secrets namespace
-```
-
-**Note**: For most use cases, you don't need this configuration. Simply create all your Kubernetes secrets in the same namespace where you deploy your services.
+- **Kubernetes Secrets**: All secrets must be created in the same namespace as the Secrets Router
+- **No Additional Setup**: Works out of the box with standard Kubernetes secrets
+- **Single Namespace**: Simplified deployment model reduces configuration complexity
 
 ### Service Configuration
 
@@ -258,29 +184,29 @@ Each service receives only these core environment variables:
 #### Service Configuration Examples
 
 ```yaml
-# Python service with AWS and Kubernetes secrets
+# Python service
 sample-service-python:
   enabled: true
   secrets:
     rds-credentials: "prod-db-credentials"           # Kubernetes secret name
-    api-keys: "/aws/production/api-keys"             # AWS Secrets Manager path
+    api-keys: "api-keys"                            # API keys secret
   
-# Node service with mixed secret sources
+# Node service
 sample-service-node:
   enabled: true
   secrets:
-    redis-password: "redis-cluster-prod"            # Kubernetes secret name
-    jwt-secret: "/prod/auth/jwt-secret"             # AWS Secrets Manager path
+    redis-password: "redis-cluster-prod"            # Redis credentials secret
+    jwt-secret: "jwt-credentials"                    # JWT token secret
 
 # Bash service with shell credentials
 sample-service-bash:
   enabled: true
   secrets:
     rds-credentials: "prod-db-credentials"
-    shell-password: "/ops/shell/secrets"
+    shell-password: "shell-credentials"
 ```
 
-Services make HTTP requests to the secrets-router using the secret names configured above. The secrets-router will find and return the secret values from the appropriate backend (Kubernetes secrets or AWS Secrets Manager).
+Services make HTTP requests to the secrets-router using the secret names configured above. All secrets must be Kubernetes secrets in the same namespace as the deployedservices.
 
 ## Build Commands
 
@@ -301,18 +227,18 @@ make helm-package
 ## Troubleshooting
 
 ### Secret Not Found (404)
-1. **Verify Secret Creation**: Ensure you created the secret in the correct location:
+1. **Verify Secret Creation**: Ensure you created the secret in the deployment namespace:
    ```bash
-   # For Kubernetes secrets
-   kubectl get secret rds-credentials -n my-namespace
-   
-   # For AWS Secrets Manager
-   aws secretsmanager describe-secret --name "/aws/prod/api-keys"
+   kubectl get secret rds-credentials -n production
    ```
-2. **Check Configuration**: Verify the secret name/path in your values.yaml matches exactly what you created
-3. **Namespace Match**: Ensure you're referencing secrets in the same namespace where your services are deployed
+2. **Check Configuration**: Verify the secret name in your values.yaml matches exactly what you created
+3. **Namespace Match**: Ensure all secrets are in the same namespace where you deploy the Secrets Router
 4. **Test Access**: Try accessing the secret directly from a pod to verify connectivity
 5. **Upgrade if Needed**: Update your Helm release if configuration changes were made
+6. **List All Secrets**: Check what secrets are available in the namespace:
+   ```bash
+   kubectl get secrets -n production
+   ```
 
 ### Connection Issues
 ```bash
@@ -382,8 +308,8 @@ helm template ./charts/umbrella --dry-run=client -f your-values.yaml | grep -A 2
 ### Best Practices for Testing
 
 - **Use Separate Namespaces**: Create dedicated namespaces for testing to avoid conflicts with production secrets
-- **Test Both Backends**: Verify access to both Kubernetes secrets and AWS Secrets Manager (if applicable)
 - **Validate Each Secret**: Test individual secret keys to ensure data integrity
 - **Error Handling**: Verify your applications handle secret access failures gracefully
+- **Simple Setup**: Use only Kubernetes secrets in the same namespace as your services
 
 That's it! You're ready to use Secrets Router in your applications.
