@@ -1,0 +1,23 @@
+# Override file for same-namespace success test
+# ONLY values that differ from base chart defaults
+
+# For local testing - don't pull from external registry
+secrets-router:
+  image:
+    pullPolicy: Never  # Override base "Always"
+
+# Sample services configuration - populate actual secret names
+sample-service-python:
+  secrets:
+    rds-credentials: "rds-credentials"  # Override base empty string
+    api-keys: "api-keys"
+
+sample-service-node:
+  secrets:
+    rds-credentials: "rds-credentials"
+    redis-password: "redis-password"
+
+sample-service-bash:
+  secrets:
+    rds-credentials: "rds-credentials"
+    shell-password: "shell-password"

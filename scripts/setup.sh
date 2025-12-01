@@ -4,10 +4,10 @@
 
 set -e
 
-NAMESPACE="test-namespace-1"
-RELEASE_NAME="test-1"
+NAMESPACE="demo"
+RELEASE_NAME="control-plane"
 
-echo "🔧 Setting up Test Scenario 1: New Secrets Configuration"
+echo "🔧 Setting up Demo: New Secrets Configuration"
 echo "Namespace: $NAMESPACE"
 echo "Release: $RELEASE_NAME"
 
@@ -16,10 +16,10 @@ echo "📦 Creating namespace: $NAMESPACE"
 kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
 
 # Create test secrets in the namespace
-echo "🔐 Creating test secrets..."
+echo "🔐 Creating demo secrets..."
 
 # RDS credentials secret
-kubectl create secret generic k8s-rds-credentials \
+kubectl create secret generic rds-credentials \
   --from-literal=host="test-db.example.com" \
   --from-literal=port="5432" \
   --from-literal=username="testuser" \
@@ -29,7 +29,7 @@ kubectl create secret generic k8s-rds-credentials \
   --dry-run=client -o yaml | kubectl apply -f -
 
 # API keys secret
-kubectl create secret generic k8s-api-keys \
+kubectl create secret generic api-keys \
   --from-literal=api-key="sk-test-api-key-12345" \
   --from-literal=api-secret="secret-api-key-67890" \
   --from-literal=webhook-url="https://api.example.com/webhook" \
@@ -37,19 +37,25 @@ kubectl create secret generic k8s-api-keys \
   --dry-run=client -o yaml | kubectl apply -f -
 
 # Redis password secret
-kubectl create secret generic k8s-redis-password \
+kubectl create secret generic redis-password \
   --from-literal=password="redis-secret-password-abc" \
   --from-literal=host="redis.example.com" \
   --from-literal=port="6379" \
   --namespace $NAMESPACE \
   --dry-run=client -o yaml | kubectl apply -f -
 
+kubectl create secret generic shell-password \
+  --from-literal=password="shell-secret-password-abc" \
+  --namespace $NAMESPACE \
+  --dry-run=client -o yaml | kubectl apply -f -
+
 echo "✅ Test secrets created successfully in namespace: $NAMESPACE"
 echo ""
 echo "📋 Created secrets:"
-echo "  - k8s-rds-credentials (host, port, username, password, database)"
-echo "  - k8s-api-keys (api-key, api-secret, webhook-url)"
-echo "  - k8s-redis-password (password, host, port)"
+echo "  - rds-credentials (host, port, username, password, database)"
+echo "  - api-keys (api-key, api-secret, webhook-url)"
+echo "  - redis-password (password, host, port)"
+echo "  - shell-password (password)"
 echo ""
 echo "🚀 Ready to deploy with:"
-echo "  helm upgrade --install $RELEASE_NAME ./charts/umbrella --namespace $NAMESPACE -f testing/1/override.yaml"
+echo "  helm upgrade --install $RELEASE_NAME ./charts/umbrella --namespace $NAMESPACE -f testing/override.yaml"
