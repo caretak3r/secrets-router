@@ -21,3 +21,21 @@ secrets-router:
 # Sample Service Configuration
 sample-service:
   enabled: true
+
+# Service Secret Configuration
+# Configure secrets needed by each service
+# When deploying, provide override file with actual secret names/paths
+services:
+  sample-service:
+    secrets:
+      # Key: reference name for the secret in your app
+      # Value: actual secret name/path (e.g., "rds-credentials", "/aws/prod/rds-credentials")
+      rds-credentials: ""  # Override in your values file with actual secret path
+      api-keys: ""         # Override in your values file with actual secret path
+      redis-password: ""   # Override in your values file with actual secret path
+  
+  # Add additional services as needed
+  # web-app:
+  #   secrets:
+  #     database-url: ""
+  #     jwt-secret: ""
