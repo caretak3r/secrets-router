@@ -1,26 +1,19 @@
 # Test 1: Same Namespace Success Case
-# Minimal override file - ONLY values that differ from base chart defaults
+# Test deployment - secrets router and python client in same namespace
+
+# Note: Sample service URLs and namespaces are now handled dynamically by templates
+# using .Release.Name and .Release.Namespace - no manual overrides needed
 
 secrets-router:
   image:
     pullPolicy: Never  # Override base "Always" for local images
   secretStores:
     aws:
-      enabled: false   # Override base "true" for K8s-only testing
-    stores:
-      kubernetes-secrets:
-        namespaces:
-          - test-namespace-1
+      enabled: false   # Disable AWS for K8s-only testing
 
 sample-service:
   clients:
-    python:
-      env:
-        - name: SECRETS_ROUTER_URL
-          value: "http://test-1-secrets-router.test-namespace-1.svc.cluster.local:8080"  # Different from default
-        - name: TEST_NAMESPACE
-          value: "test-namespace-1"     # Different from default "dapr-control-plane"
     node:
-      enabled: false    # Override base "true" to reduce test complexity
+      enabled: false    # Reduce test complexity
     bash:
-      enabled: false    # Override base "true" to reduce test complexity
+      enabled: false    # Reduce test complexity

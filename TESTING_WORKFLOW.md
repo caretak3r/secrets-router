@@ -29,12 +29,19 @@ The orchestrator executes exactly two test scenarios:
 #### Test 1: Same Namespace Success Case
 - **Objective**: Deploy secrets-router, Dapr, and sample services in the same namespace
 - **Expected Result**: All services communicate successfully within the shared namespace
-- **Service Discovery**: Uses in-cluster DNS: `<service-name>.<namespace>.svc.cluster.local`
+- **Service Discovery**: Uses simplified service name `secrets-router` (not `{release-name}-secrets-router`)
+- **URL Format**: `http://secrets-router.{namespace}.svc.cluster.local:8080`
+- **Template Magic**: Environment variables `SECRETS_ROUTER_URL` and `TEST_NAMESPACE` auto-generated from `.Release.Namespace`
 
-#### Test 2: Cross-Namespace Failure Case  
-- **Objective**: Split deployment across namespaces to demonstrate failure modes
-- **Configuration**: secrets-router and Dapr in one namespace (test-2-router), sample services in another (test-2-clients)
-- **Expected Result**: Cross-namespace communication failures demonstrating namespace scoping requirements
+#### Test 2: Cross-Namespace Documentation Case  
+- **Objective**: Document cross-namespace limitations with current simplified templates
+- **Configuration**: Current templates use `.Release.Namespace` only
+- **Expected Behavior**: Cross-namespace communication requires manual configuration
+- **Manual Steps Required**: 
+  1. Deploy secrets-router in namespace A
+  2. Deploy clients separately in namespace B
+  3. Manually set `SECRETS_ROUTER_URL=http://secrets-router.namespace-a.svc.cluster.local:8080`
+- **Design Rationale**: Simplicity over edge-case automation; most production use cases are same-namespace
 
 ### Critical Override File Methodology
 
@@ -63,23 +70,27 @@ secrets-router:
   secretStores:
     aws:
       enabled: false   # Override base "true"
-    stores:
-      kubernetes-secrets:
-        namespaces:
-          - test-namespace-1  # Test-specific config
 
 sample-service:
   clients:
     python:
-      env:
-        SECRETS_ROUTER_URL: "http://test-1-secrets-router.test-namespace-1.svc.cluster.local:8080"  # Different from default
-        TEST_SECRET_NAME: "sample-secret"    # Same as default - could be omitted
-        TEST_NAMESPACE: "test-namespace-1"     # Different from default "dapr-control-plane"
+      enabled: true   # Enable for testing
     node:
-      enabled: false    # Override base "true"
+      enabled: false  # Override base "true" to disable
+    bash:
+      enabled: false  # Override base "true" to disable
+
+# Note: SECRETS_ROUTER_URL and TEST_NAMESPACE are now auto-generated from .Release.Namespace
+# No manual env overrides needed for same-namespace deployments
 ```
 
 **Principle**: If the value is the same as in the base chart, DO NOT include it in the override.yaml!
+
+**Template Simplification Benefits:**
+- Service name is always `secrets-router` (predictable DNS name)
+- Environment variables auto-generated from `.Release.Namespace`
+- No complex `targetNamespace` conditional logic
+- Same-namespace deployments work automatically
 
 ### Test-Override Configuration
 
@@ -268,7 +279,7 @@ echo "=== Test 1: Secrets Router Health Checks ==="
 kubectl logs -n test-namespace-1 -l app.kubernetes.io/name=secrets-router --tail=50
 
 # Test health endpoints directly via port-forward
-kubectl port-forward -n test-namespace-1 svc/test-1-secrets-router 8080:8080 &
+kubectl port-forward -n test-namespace-1 svc/secrets-router 8080:8080 &
 sleep 5
 
 # Test liveness endpoint (/healthz)
@@ -289,15 +300,24 @@ echo "=== Test 1: Python Client Service Discovery ==="
 kubectl logs -n test-namespace-1 -l app.kubernetes.io/name=sample-service-python --tail=50
 
 # Check connectivity from client pods to secrets router
+# Note: Service name is always "secrets-router" (simplified naming)
 PYTHON_POD=$(kubectl get pods -n test-namespace-1 -l app.kubernetes.io/name=sample-service-python -o jsonpath='{.items[0].metadata.name}')
 kubectl exec -n test-namespace-1 $PYTHON_POD -- \
-  curl -s "http://test-1-secrets-router.test-namespace-1.svc.cluster.local:8080/healthz"
+  curl -s "http://secrets-router.test-namespace-1.svc.cluster.local:8080/healthz"
 
-# Test cross-namespace failures in Test 2
-echo "=== Test 2: Cross-Namespace Service Discovery ==="
-PYTHON_POD=$(kubectl get pods -n test-namespace-2 -l app.kubernetes.io/name=sample-service-python -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -n test-namespace-2 $PYTHON_POD -- \
-  curl -s "http://test-2-secrets-router.test-namespace-2.svc.cluster.local:8080/healthz" || echo "Expected failure: Cross-namespace communication"
+# Verify environment variables are correctly set from template
+kubectl exec -n test-namespace-1 $PYTHON_POD -- env | grep -E "(SECRETS_ROUTER_URL|TEST_NAMESPACE)"
+# Expected output:
+# SECRETS_ROUTER_URL=http://secrets-router.test-namespace-1.svc.cluster.local:8080
+# TEST_NAMESPACE=test-namespace-1
+
+# Cross-namespace testing requires manual configuration
+echo "=== Test 2: Cross-Namespace (Manual Configuration Required) ==="
+# Current templates don't support automatic cross-namespace configuration
+# To test cross-namespace access:
+# 1. Deploy secrets-router in namespace-a: helm install router ./charts/umbrella -n namespace-a --set sample-service.enabled=false
+# 2. Deploy clients in namespace-b with manual SECRETS_ROUTER_URL override
+# 3. Verify connectivity: curl http://secrets-router.namespace-a.svc.cluster.local:8080/healthz
 ```
 
 ## Step 6: Troubleshooting Guide
@@ -323,11 +343,32 @@ kubectl logs -n <namespace> <pod-name> --previous
 
 #### Service Discovery Issues
 ```bash
-# Verify service DNS resolution
-kubectl exec -n <namespace> <pod-name> -- nslookup <service-name>.<namespace>.svc.cluster.local
+# Verify service DNS resolution (service name is always "secrets-router")
+kubectl exec -n <namespace> <pod-name> -- nslookup secrets-router.<namespace>.svc.cluster.local
 
 # Check service endpoints
 kubectl get endpoints -n <namespace>
+
+# Verify the service is named correctly (should be "secrets-router", not "{release}-secrets-router")
+kubectl get svc -n <namespace> | grep secrets-router
+
+# Check environment variables in client pods
+kubectl exec -n <namespace> <pod-name> -- env | grep SECRETS_ROUTER_URL
+# Expected: SECRETS_ROUTER_URL=http://secrets-router.<namespace>.svc.cluster.local:8080
+```
+
+#### Cross-Namespace Connectivity Issues
+**Symptoms**: Client pods cannot reach secrets-router in a different namespace
+**Cause**: Templates use `.Release.Namespace` consistently; cross-namespace not auto-configured
+**Solution**:
+```bash
+# For cross-namespace testing, manually set the environment variable:
+kubectl set env deployment/<client-deployment> -n <client-namespace> \
+  SECRETS_ROUTER_URL=http://secrets-router.<router-namespace>.svc.cluster.local:8080
+
+# Or patch the pod spec directly:
+kubectl patch deployment <client-deployment> -n <client-namespace> \
+  --type='json' -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/env/0/value", "value": "http://secrets-router.<router-namespace>.svc.cluster.local:8080"}]'
 ```
 
 #### Dapr Integration Issues
@@ -438,7 +479,7 @@ kubectl create secret generic database-credentials \
 PYTHON_POD=$(kubectl get pods -n test-namespace-1 -l app.kubernetes.io/name=sample-service-python -o jsonpath='{.items[0].metadata.name}')
 kubectl exec -n test-namespace-1 $PYTHON_POD -- python3 -c "
 import httpx
-response = httpx.get('http://test-1-secrets-router.test-namespace-1.svc.cluster.local:8080/secrets/database-credentials/password')
+response = httpx.get('http://secrets-router.test-namespace-1.svc.cluster.local:8080/secrets/database-credentials/password')
 print(f'Secret retrieved: {response.text}')
 "
 ```
@@ -453,7 +494,9 @@ kubectl create secret generic app-config \
 
 # Test access from test-namespace-2
 PYTHON_POD=$(kubectl get pods -n test-namespace-2 -l app.kubernetes.io/name=sample-service-python -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -n test-namespace-2 $PYTHON_POD -- curl -s "http://test-2-secrets-router.test-namespace-2.svc.cluster.local:8080/secrets/app-config/api-key?namespace=shared-secrets"
+# Note: This example shows cross-namespace access which requires manual URL configuration
+# With simplified templates, client would need SECRETS_ROUTER_URL manually set to router namespace
+kubectl exec -n test-namespace-2 $PYTHON_POD -- curl -s "http://secrets-router.test-namespace-2.svc.cluster.local:8080/secrets/app-config/api-key?namespace=shared-secrets"
 ```
 
 ### 7.3 Test Scenario 3: Client Connectivity Validation
@@ -464,15 +507,15 @@ for ns in test-namespace-3; do
   
   # Python client
   PYTHON_POD=$(kubectl get pods -n $ns -l app.kubernetes.io/name=sample-service-python -o jsonpath='{.items[0].metadata.name}')
-  kubectl exec -n $ns $PYTHON_POD -- curl -s "http://test-3-secrets-router.$ns.svc.cluster.local:8080/healthz"
+  kubectl exec -n $ns $PYTHON_POD -- curl -s "http://secrets-router.$ns.svc.cluster.local:8080/healthz"
   
   # Bash client  
   BASH_POD=$(kubectl get pods -n $ns -l app.kubernetes.io/name=sample-service-bash -o jsonpath='{.items[0].metadata.name}')
-  kubectl exec -n $ns $BASH_POD -- curl -s "http://test-3-secrets-router.$ns.svc.cluster.local:8080/healthz"
+  kubectl exec -n $ns $BASH_POD -- curl -s "http://secrets-router.$ns.svc.cluster.local:8080/healthz"
   
   # Node client
   NODE_POD=$(kubectl get pods -n $ns -l app.kubernetes.io/name=sample-service-node -o jsonpath='{.items[0].metadata.name}')
-  kubectl exec -n $ns $NODE_POD -- curl -s "http://test-3-secrets-router.$ns.svc.cluster.local:8080/healthz"
+  kubectl exec -n $ns $NODE_POD -- curl -s "http://secrets-router.$ns.svc.cluster.local:8080/healthz"
 done
 ```
 
@@ -483,11 +526,13 @@ done
 - Both test deployments complete successfully using the orchestrator approach
 - All pods reach Running status with Ready condition, supported by startupProbe configuration
 - Secrets router responds to health checks (/healthz, /readyz) with proper Dapr connectivity
-- Sample clients can communicate with secrets router using in-cluster DNS
-- Service discovery works correctly in same-namespace scenario (Test 1)
-- Cross-namespace failure modes are properly demonstrated (Test 2)
-- Override files contain only values that differ from base chart defaults
+- Sample clients can communicate with secrets router using simplified `secrets-router` service name
+- Service discovery works correctly in same-namespace scenario (Test 1) with auto-generated env vars
+- Cross-namespace limitations are documented and manual procedures verified (Test 2)
+- Override files contain only values that differ from base chart defaults (no manual env overrides for same-namespace)
 - Dapr sidecar injection and mTLS establishment verified via readiness probe
+- Service name is consistently `secrets-router` (not `{release-name}-secrets-router`)
+- Environment variables `SECRETS_ROUTER_URL` and `TEST_NAMESPACE` correctly derived from `.Release.Namespace`
 
 ## Performance and Health Notes
 

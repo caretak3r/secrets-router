@@ -32,7 +32,7 @@ graph TB
         end
         
         subgraph "Secrets Router Pod"
-            ROUTER[Secrets Router<br/>FastAPI Service<br/>Port 8080]
+            ROUTER["Secrets Router<br/>Service: secrets-router<br/>Port 8080"]
             DAPR_SIDECAR[Dapr Sidecar<br/>Port 3500]
             ROUTER <-->|localhost:3500| DAPR_SIDECAR
         end
@@ -59,9 +59,9 @@ graph TB
         IRSA[IAM Role for ServiceAccount]
     end
     
-    APP1 -->|HTTP GET /secrets/{name}/{key}?namespace=production| ROUTER
-    APP2 -->|HTTP GET /secrets/{name}/{key}?namespace=production| ROUTER
-    APP3 -->|HTTP GET /secrets/{name}/{key}?namespace=production| ROUTER
+    APP1 -->|"http://secrets-router:8080/secrets/{name}/{key}"| ROUTER
+    APP2 -->|"http://secrets-router:8080/secrets/{name}/{key}"| ROUTER
+    APP3 -->|"http://secrets-router:8080/secrets/{name}/{key}"| ROUTER
     
     ROUTER -->|HTTP localhost:3500| DAPR_SIDECAR
     DAPR_SIDECAR -->|Component API| K8S_COMP
@@ -83,6 +83,32 @@ graph TB
     style K8S_SECRET2 fill:#87ceeb
     style AWS_SM fill:#ffa07a
 ```
+
+### Simplified Service Discovery
+
+The secrets-router service uses a **simplified, predictable naming scheme**:
+
+| Aspect | Value |
+|--------|-------|
+| **Service Name** | Always `secrets-router` (not `{release-name}-secrets-router`) |
+| **Short URL** | `http://secrets-router:8080` (same namespace) |
+| **FQDN** | `http://secrets-router.{namespace}.svc.cluster.local:8080` |
+| **Labels** | `app.kubernetes.io/name: secrets-router` |
+
+**Template Helper Function:**
+```yaml
+{{- define "sample-service.secretsRouterURL" -}}
+{{- printf "http://secrets-router.%s.svc.cluster.local:8080" .Release.Namespace }}
+{{- end }}
+```
+
+**Auto-Generated Environment Variables:**
+- `SECRETS_ROUTER_URL`: Derived from `.Release.Namespace`
+- `TEST_NAMESPACE`: Set to `.Release.Namespace`
+
+**Cross-Namespace Access:**
+- Same-namespace: Works automatically with template helpers
+- Cross-namespace: Requires manual `SECRETS_ROUTER_URL` configuration
 
 ## Secret Resolution Flow
 
@@ -266,9 +292,9 @@ graph LR
     
     subgraph "Umbrella Chart Dependencies"
         UMBRELLA --> DAPR[Dapr Control Plane<br/>dapr-system namespace<br/>enhanced health checks]
-        UMBRELLA --> ROUTER[Secrets Router<br/>Customer namespace<br/>startupProbe: 30 failures]
+        UMBRELLA --> ROUTER["Secrets Router<br/>Service: secrets-router<br/>startupProbe: 12 failures"]
         UMBRELLA --> COMPONENTS[Dapr Components<br/>Customer namespace<br/>generated from values]
-        UMBRELLA --> SAMPLE[Sample Services<br/>Testing support<br/>configurable restartPolicy]
+        UMBRELLA --> SAMPLE["Sample Services<br/>Auto env vars from<br/>.Release.Namespace"]
     end
     
     subgraph "Customer Namespace"
@@ -286,6 +312,30 @@ graph LR
     style SAMPLE fill:#ffa07a
 ```
 
+### Service Naming Design
+
+The secrets-router service uses **static naming** for predictability:
+
+```yaml
+# Service always named "secrets-router" - NOT {release-name}-secrets-router
+apiVersion: v1
+kind: Service
+metadata:
+  name: secrets-router
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: secrets-router
+```
+
+**Benefits:**
+- Predictable DNS name: `secrets-router.{namespace}.svc.cluster.local`
+- Simplified client configuration with auto-generated env vars
+- No need to know release name for service discovery
+
+**Limitation:**
+- Cannot deploy multiple secrets-router instances in same namespace
+- Cross-namespace access requires manual environment variable override
+
 ### Enhanced Deployment Features with Dapr Timing Optimizations
 
 #### Health Check Integration (Optimized for Dapr Sidecar)
@@ -293,7 +343,7 @@ graph LR
 - **Readiness Probe**: Reduced initial delay (5s) for faster readiness detection, validates Dapr connectivity
 - **Liveness Probe**: Standard interval (15s) with appropriate delays for stable health monitoring
 - **Probe Differentiation**: `/healthz` for basic service health, `/readyz` for Dapr connectivity validation
-- **Service Discovery**: Dynamic endpoint resolution using `{release-name}-secrets-router.{namespace}.svc.cluster.local:8080`
+- **Service Discovery**: Simplified endpoint using `secrets-router.{namespace}.svc.cluster.local:8080` (static service name)
 
 #### Restart Policy Management
 - **Production Services**: `restartPolicy: Always` for secrets-router (Deployment resource standard)
@@ -312,8 +362,9 @@ graph LR
 - **Automated Orchestrator**: Builds containers and manages dependencies efficiently
 - **Health Validation**: StartupProbe with 60-second window handles Dapr sidecar timing issues
 - **Curl Fix Resolution**: Bash scripts use proper quote escaping (`\n%{http_code}` with single quotes)
-- **Dynamic Service Discovery**: Template-based URL generation eliminates hardcoded namespace references
+- **Simplified Service Discovery**: Static `secrets-router` service name with auto-generated env vars from `.Release.Namespace`
 - **Restart Policy Optimization**: Test services use `Never` policy to prevent unnecessary restart loops
+- **Cross-Namespace Limitation**: Cross-namespace testing requires manual `SECRETS_ROUTER_URL` configuration
 
 ### Container Build and Image Management
 

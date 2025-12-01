@@ -91,18 +91,81 @@ secrets-router:
 sample-service:
   clients:
     python:
-      env:
-        SECRETS_ROUTER_URL: "http://test-1-secrets-router.test-namespace-1.svc.cluster.local:8080"
-        TEST_NAMESPACE: "test-namespace-1"  # Different from default "dapr-control-plane"
+      enabled: true   # Enable for testing
     node:
       enabled: false  # Override base "true" to disable
     bash:
       enabled: false  # Override base "true" to disable
 
+# Note: SECRETS_ROUTER_URL and TEST_NAMESPACE are auto-generated from .Release.Namespace
+# No manual env overrides needed for same-namespace deployments
+
 # Dapr control plane configuration
 dapr:
   enabled: true  # Enable for proper testing
 ```
+
+### Template Simplification Philosophy
+
+The sample-service templates were simplified to use `.Release.Namespace` consistently, eliminating complex conditional logic.
+
+**Auto-Generated Environment Variables:**
+- `SECRETS_ROUTER_URL`: Generated as `http://secrets-router.{{ .Release.Namespace }}.svc.cluster.local:8080`
+- `TEST_NAMESPACE`: Set to `{{ .Release.Namespace }}`
+
+**Simplified Helper Template (`_helpers.tpl`):**
+```yaml
+{{- define "sample-service.secretsRouterURL" -}}
+{{- printf "http://secrets-router.%s.svc.cluster.local:8080" .Release.Namespace }}
+{{- end }}
+```
+
+**Service Name Simplification:**
+- Service is always named `secrets-router` (not `{release-name}-secrets-router`)
+- Labels use `app.kubernetes.io/name: secrets-router` consistently  
+- Predictable DNS name: `secrets-router.{namespace}.svc.cluster.local`
+
+**Benefits:**
+1. No complex conditional logic for `targetNamespace`
+2. Consistent behavior across all deployments
+3. Easier debugging with predictable service names
+4. Reduced configuration errors
+5. Clear separation: same-namespace works automatically, cross-namespace is explicit
+
+**Cross-Namespace Testing Limitation:**
+- Templates do not support automatic cross-namespace configuration
+- Cross-namespace testing requires manual environment variable overrides
+- See [Cross-Namespace Testing](#cross-namespace-testing-guidance) section below
+
+### Cross-Namespace Testing Guidance
+
+The simplified template design means cross-namespace testing requires manual steps:
+
+**Same-Namespace (Automatic):**
+```bash
+# Deploy everything together - works automatically
+helm install test ./charts/umbrella -n test-namespace -f testing/1/override.yaml
+```
+
+**Cross-Namespace (Manual):**
+```bash
+# Step 1: Deploy secrets-router in namespace A
+helm install router ./charts/umbrella -n namespace-a \
+  --set sample-service.enabled=false
+
+# Step 2: Deploy sample-service separately in namespace B
+# (requires custom deployment or kubectl patch)
+
+# Step 3: Manually set environment variable in namespace B pod:
+kubectl set env deployment/sample-python -n namespace-b \
+  SECRETS_ROUTER_URL=http://secrets-router.namespace-a.svc.cluster.local:8080
+```
+
+**Why This Design Choice?**
+- Most production deployments use same-namespace patterns
+- Cross-namespace is an edge case requiring explicit configuration
+- Simplicity reduces misconfiguration risks
+- The predictable `secrets-router` service name makes manual configuration straightforward
 
 ## Quick Start
 

@@ -2077,3 +2077,203 @@ This section outlines the phased approach for implementing the Secrets Broker Se
 - **Multi-replica coordination**: Cache synchronization → Consider Redis or similar
 - **Certificate rotation**: Operational overhead → Automate via cert-manager or similar
 
+---
+
+# ADR-004: Simplified Service Naming and Namespace Handling
+
+## Status
+**Accepted** | Date: 2025-12-01 | Authors: Platform Engineering Team
+
+## Context
+
+During template development and testing, we identified complexity and potential misconfiguration issues related to:
+
+1. **Service Naming Complexity**: Using `{release-name}-secrets-router` pattern made service URLs unpredictable
+2. **Cross-Namespace Configuration**: Complex conditional logic for `.Values.targetNamespace` added unnecessary complexity
+3. **Override File Redundancy**: Users had to manually specify `SECRETS_ROUTER_URL` and `TEST_NAMESPACE` even for same-namespace deployments
+4. **Template Maintenance**: Complex conditionals in `_helpers.tpl` made templates harder to understand and maintain
+
+The original approach used release-name-prefixed service names and supported configurable target namespaces, which:
+- Made service discovery URLs unpredictable (e.g., `test-1-secrets-router` vs `prod-secrets-router`)
+- Required users to understand and configure `targetNamespace` values
+- Complicated override files with redundant environment variable specifications
+- Increased potential for misconfiguration
+
+## Decision Drivers
+
+1. **Predictability**: Service names should be consistent and predictable across all deployments
+2. **Simplicity**: Reduce template complexity and configuration overhead
+3. **Developer Experience**: Minimize required configuration for common use cases
+4. **Maintainability**: Templates should be easy to understand and modify
+5. **Same-Namespace Optimization**: Most production deployments use same-namespace patterns
+6. **Explicit Over Implicit**: Cross-namespace access should be explicit, not automatic
+
+## Considered Options
+
+### Option 1: Release-Name Prefixed Service Naming (Original)
+```yaml
+# Service name: {release-name}-secrets-router
+name: {{ include "secrets-router.fullname" . }}
+# URL: http://{release-name}-secrets-router.{namespace}.svc.cluster.local:8080
+```
+
+**Pros:**
+- Allows multiple secrets-router instances in same namespace
+- Standard Helm naming convention
+
+**Cons:**
+- Unpredictable service URLs
+- Requires manual URL configuration in clients
+- More complex override files
+
+### Option 2: Simplified Static Service Naming (Chosen)
+```yaml
+# Service name: always "secrets-router"
+name: secrets-router
+# URL: http://secrets-router.{namespace}.svc.cluster.local:8080
+```
+
+**Pros:**
+- Predictable, consistent service name
+- Simplified client configuration
+- Auto-generated environment variables from `.Release.Namespace`
+- Minimal override files
+
+**Cons:**
+- Cannot deploy multiple secrets-router instances in same namespace
+- Cross-namespace requires manual configuration
+
+### Option 3: Configurable with Default
+```yaml
+# Service name: {{ .Values.serviceName | default "secrets-router" }}
+```
+
+**Pros:**
+- Flexibility for edge cases
+- Default covers most use cases
+
+**Cons:**
+- Additional configuration option to document and maintain
+- Still requires understanding of naming behavior
+
+## Decision Outcome
+
+**Chosen Solution: Option 2 - Simplified Static Service Naming**
+
+We chose to simplify the service naming and namespace handling because:
+
+1. **Predictability**: Service is always named `secrets-router`, making DNS names predictable
+2. **Auto-Configuration**: Environment variables auto-generated from `.Release.Namespace`
+3. **Minimal Override**: Same-namespace deployments require no manual env var configuration
+4. **Template Clarity**: Removed complex `targetNamespace` conditional logic
+5. **Production Focus**: Most production deployments use same-namespace patterns
+
+### Implementation Details
+
+**Service Template (service.yaml):**
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: secrets-router  # Static name, not {{ include "secrets-router.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: secrets-router
+    app.kubernetes.io/instance: {{ .Release.Name }}
+```
+
+**Helper Template (_helpers.tpl):**
+```yaml
+{{- define "sample-service.secretsRouterURL" -}}
+{{- printf "http://secrets-router.%s.svc.cluster.local:8080" .Release.Namespace }}
+{{- end }}
+```
+
+**Client Environment Variables (auto-generated):**
+```yaml
+env:
+  - name: SECRETS_ROUTER_URL
+    value: {{ include "sample-service.secretsRouterURL" . | quote }}
+  - name: TEST_NAMESPACE
+    value: {{ .Release.Namespace | quote }}
+```
+
+**Simplified Override File (testing/1/override.yaml):**
+```yaml
+# No manual SECRETS_ROUTER_URL or TEST_NAMESPACE needed for same-namespace
+secrets-router:
+  image:
+    pullPolicy: Never
+  secretStores:
+    aws:
+      enabled: false
+
+sample-service:
+  clients:
+    python:
+      enabled: true
+    node:
+      enabled: false
+    bash:
+      enabled: false
+```
+
+## Consequences
+
+### Positive
+
+1. **Predictable DNS**: Always `secrets-router.{namespace}.svc.cluster.local:8080`
+2. **Reduced Configuration**: No manual env var overrides for same-namespace deployments
+3. **Simpler Templates**: Removed complex `targetNamespace` conditional logic
+4. **Easier Debugging**: Consistent service name across all environments
+5. **Cleaner Override Files**: Minimal configuration in `override.yaml` files
+
+### Negative
+
+1. **Single Instance Limit**: Cannot deploy multiple secrets-router instances in same namespace
+2. **Manual Cross-Namespace**: Cross-namespace testing requires manual env var configuration
+3. **Breaking Change**: Existing configurations using `{release-name}-secrets-router` URLs need updating
+
+### Neutral
+
+1. **Cross-Namespace Edge Case**: Most deployments don't require cross-namespace access
+2. **Documentation Requirement**: Need clear documentation for manual cross-namespace procedures
+
+## Migration Guide
+
+**For Existing Deployments:**
+
+1. Update service discovery URLs from `{release-name}-secrets-router` to `secrets-router`
+2. Remove manual `SECRETS_ROUTER_URL` and `TEST_NAMESPACE` from override files (auto-generated now)
+3. For cross-namespace access, manually set:
+   ```bash
+   kubectl set env deployment/<client> -n <client-namespace> \
+     SECRETS_ROUTER_URL=http://secrets-router.<router-namespace>.svc.cluster.local:8080
+   ```
+
+**New Deployments:**
+
+- Same-namespace: Works automatically with no configuration
+- Cross-namespace: Requires manual environment variable configuration
+
+## Cross-Namespace Testing Procedure
+
+Since templates now use `.Release.Namespace` consistently:
+
+```bash
+# Step 1: Deploy secrets-router in namespace A
+helm install router ./charts/umbrella -n namespace-a --set sample-service.enabled=false
+
+# Step 2: Deploy clients in namespace B (separate helm install or kubectl)
+# Step 3: Manually configure client environment
+kubectl set env deployment/sample-python -n namespace-b \
+  SECRETS_ROUTER_URL=http://secrets-router.namespace-a.svc.cluster.local:8080
+```
+
+## Future Considerations
+
+1. **Service Mesh Integration**: Consider Istio/Linkerd for cross-namespace service discovery
+2. **DNS Aliases**: Could add optional DNS alias configuration for complex deployments
+3. **Multi-Instance Support**: If needed, could add optional service name suffix configuration
+4. **Cross-Namespace Operator**: Could develop operator pattern for automatic cross-namespace configuration
+

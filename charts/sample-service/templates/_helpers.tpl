@@ -52,5 +52,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 Secrets Router URL
 */}}
 {{- define "sample-service.secretsRouterURL" -}}
-{{- printf "http://%s-secrets-router.%s.svc.cluster.local:8080" .Release.Name .Release.Namespace }}
+{{- printf "http://secrets-router.%s.svc.cluster.local:8080" .Release.Namespace }}
 {{- end }}
+
+

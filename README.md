@@ -120,11 +120,57 @@ healthChecks:
 Sample services now use dynamic endpoint configuration with the `sample-service.secretsRouterURL` helper template:
 
 ```yaml
-# Automatically generates service URL: {release-name}-secrets-router.{namespace}.svc.cluster.local:8080
+# Automatically generates service URL: secrets-router.{namespace}.svc.cluster.local:8080
 env:
   - name: SECRETS_ROUTER_URL
     value: {{ include "sample-service.secretsRouterURL" . | quote }}
+  - name: TEST_NAMESPACE
+    value: {{ .Release.Namespace | quote }}
 ```
+
+#### Service Discovery Patterns
+
+**Same-Namespace Access (Automatic):**
+- Service name: `secrets-router` (always consistent, never includes release name)
+- Short form: `secrets-router:8080` (same namespace only)
+- Template helper: `{{ include "sample-service.secretsRouterURL" . }}`
+- Generates FQDN: `http://secrets-router.{{ .Release.Namespace }}.svc.cluster.local:8080`
+
+**Cross-Namespace Access (Manual):**
+- Requires fully qualified domain name: `http://secrets-router.{target-namespace}.svc.cluster.local:8080`
+- Current templates do not support automatic cross-namespace configuration
+- See [Cross-Namespace Testing](#cross-namespace-testing) section for manual procedures
+
+**Key Simplifications:**
+- **Consistent Service Name**: Always `secrets-router` (not `{release-name}-secrets-router`)
+- **Predictable URLs**: `http://secrets-router.{namespace}.svc.cluster.local:8080`
+- **Template Logic Simplified**: Removed complex conditional logic for `.Values.targetNamespace`
+- **Auto-Generated Environment Variables**: `SECRETS_ROUTER_URL` and `TEST_NAMESPACE` derived from `.Release.Namespace`
+
+### Cross-Namespace Testing
+
+The current template design prioritizes simplicity by using `.Release.Namespace` consistently. This means:
+
+**What Works Automatically:**
+- Same-namespace deployments where secrets-router and clients are deployed together
+- Service discovery within a single namespace using the simplified `secrets-router` service name
+
+**What Requires Manual Intervention:**
+- Cross-namespace scenarios where secrets-router is in a different namespace than clients
+- Multi-namespace testing setups
+
+**Manual Cross-Namespace Procedure:**
+1. Deploy secrets-router in namespace A: `helm install test-router ./charts/umbrella -n namespace-a`
+2. Deploy sample-service separately in namespace B
+3. Manually set environment variable: `SECRETS_ROUTER_URL=http://secrets-router.namespace-a.svc.cluster.local:8080`
+4. Or use kubectl to patch the deployment with the correct URL
+
+**Design Philosophy:**
+The simplified template approach was chosen because:
+- Most production use cases deploy services in the same namespace as secrets-router
+- Cross-namespace access is an edge case that requires explicit configuration
+- Removing `.Values.targetNamespace` eliminates template complexity and potential misconfiguration
+- The predictable `secrets-router` service name makes manual cross-namespace configuration straightforward
 
 ## Architecture
 
@@ -392,8 +438,12 @@ The project includes comprehensive testing workflows with automated test orchest
 **Solutions**: Properly disable AWS components in test configurations and ensure unique component names.
 
 #### Cross-Namespace Service Discovery
-**Symptoms**: Sample services cannot connect to secrets router
-**Solutions**: Dynamic service URL generation now uses `{release-name}-secrets-router.{namespace}.svc.cluster.local:8080` template instead of hardcoded values.
+**Symptoms**: Sample services cannot connect to secrets router in a different namespace
+**Solutions**: 
+- **Same-namespace**: Works automatically using `secrets-router:8080` or the template helper
+- **Cross-namespace**: Manual configuration required - use FQDN format: `http://secrets-router.{target-namespace}.svc.cluster.local:8080`
+- **Service Name**: Always `secrets-router` (never includes release name like `{release-name}-secrets-router`)
+- **Template Design**: Current templates use `.Release.Namespace` only; cross-namespace requires manual env var override
 
 #### Sample Service Restart Policy
 **Symptoms**: CrashLoopBackOff after successful completion

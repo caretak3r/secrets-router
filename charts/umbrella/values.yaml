@@ -17,3 +17,7 @@ dapr:
 # Secrets Router Service Configuration
 secrets-router:
   enabled: true
+
+# Sample Service Configuration
+sample-service:
+  enabled: true
