@@ -1,4 +1,4 @@
-.PHONY: help build build-push deploy setup clean test lint docker-build-all helm-package charts-dependencies
+.PHONY: help build build-push deploy setup clean test lint docker-build-all docker-build-secrets-router docker-build-samples helm-package charts-dependencies
 
 # Variables
 IMAGE_NAME ?= secrets-router
@@ -14,20 +14,31 @@ help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-15s %s\n", $$1, $$2}'
 
 setup: ## Setup the project (check dependencies, make scripts executable)
-	@./scripts/setup.sh
+	@echo "Setting up project dependencies..."
+	@command -v docker >/dev/null 2>&1 || { echo "Error: docker is not installed"; exit 1; }
+	@command -v helm >/dev/null 2>&1 || { echo "Error: helm is not installed"; exit 1; }
+	@command -v kubectl >/dev/null 2>&1 || { echo "Error: kubectl is not installed"; exit 1; }
+	@echo "Setup complete!"
 
-build: ## Build the Docker image
-	@./scripts/build-image.sh $(IMAGE_TAG) $(IMAGE_REGISTRY)
+build: ## Build the secrets-router Docker image
+	@echo "Building secrets-router image..."
+	@cd secrets-router && docker build -t $(IMAGE_NAME):$(IMAGE_TAG) .
 
-build-push: ## Build and push the Docker image (requires IMAGE_REGISTRY)
+build-push: ## Build and push the secrets-router Docker image (requires IMAGE_REGISTRY)
 	@if [ -z "$(IMAGE_REGISTRY)" ]; then \
 		echo "Error: IMAGE_REGISTRY must be set for build-push"; \
 		exit 1; \
 	fi
-	@./scripts/build-image.sh $(IMAGE_TAG) $(IMAGE_REGISTRY) --push
+	@echo "Building and pushing secrets-router image..."
+	@cd secrets-router && docker build -t $(IMAGE_REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG) . && docker push $(IMAGE_REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
 
 deploy: ## Deploy Dapr and secrets-router to Kubernetes
-	@./scripts/deploy.sh $(NAMESPACE) $(IMAGE_REGISTRY) $(IMAGE_TAG)
+	@echo "Deploying to Kubernetes..."
+	@if [ -n "$(IMAGE_REGISTRY)" ]; then \
+		helm upgrade --install secrets-router ./charts/secrets-router --namespace $(NAMESPACE) --create-namespace --set image.repository=$(IMAGE_REGISTRY)/$(IMAGE_NAME) --set image.tag=$(IMAGE_TAG); \
+	else \
+		helm upgrade --install secrets-router ./charts/secrets-router --namespace $(NAMESPACE) --create-namespace --set image.repository=$(IMAGE_NAME) --set image.tag=$(IMAGE_TAG); \
+	fi
 
 clean: ## Remove local Docker images
 	@docker rmi $(IMAGE_NAME):$(IMAGE_TAG) || true
@@ -72,7 +83,7 @@ k8s-uninstall: ## Uninstall secrets-router and Dapr
 # Docker build targets
 docker-build-all: ## Build all Docker containers (secrets-router and sample services)
 	@echo "Building secrets-router image..."
-	@./scripts/build-image.sh $(IMAGE_TAG) $(IMAGE_REGISTRY)
+	@cd secrets-router && docker build -t $(IMAGE_NAME):$(IMAGE_TAG) .
 	@echo "Building sample-bash image..."
 	@cd containers/sample-bash && docker build -t sample-bash:$(IMAGE_TAG) .
 	@echo "Building sample-python image..."
@@ -80,6 +91,19 @@ docker-build-all: ## Build all Docker containers (secrets-router and sample serv
 	@echo "Building sample-node image..."
 	@cd containers/sample-node && docker build -t sample-node:$(IMAGE_TAG) .
 	@echo "All Docker images built successfully!"
+
+docker-build-secrets-router: ## Build only the secrets-router Docker image
+	@echo "Building secrets-router image..."
+	@cd secrets-router && docker build -t $(IMAGE_NAME):$(IMAGE_TAG) .
+
+docker-build-samples: ## Build only the sample service Docker images
+	@echo "Building sample-bash image..."
+	@cd containers/sample-bash && docker build -t sample-bash:$(IMAGE_TAG) .
+	@echo "Building sample-python image..."
+	@cd containers/sample-python && docker build -t sample-python:$(IMAGE_TAG) .
+	@echo "Building sample-node image..."
+	@cd containers/sample-node && docker build -t sample-node:$(IMAGE_TAG) .
+	@echo "Sample service images built successfully!"
 
 # Helm chart targets
 charts-dependencies: ## Update dependencies for all Helm charts
