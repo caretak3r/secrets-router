@@ -46,13 +46,6 @@ env:
   SERVER_PORT: "8080"
   # Service version
   SERVICE_VERSION: "0.0.1"
-  
-  # AWS Secrets Manager secret paths (optional)
-  # Configure full paths for AWS secrets in this section
-  # Example:
-  # AWS_SECRET_PATHS:
-  #   database-credentials: "/app/secrets/production/database-credentials"
-  #   api-key: "/app/secrets/production/api-key"
 
 # ServiceAccount configuration
 serviceAccount:
