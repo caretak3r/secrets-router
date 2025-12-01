@@ -1,0 +1,28 @@
+# Phase 3: Configuration Validation Tests
+# Test different image pull policies and other configurations - no Dapr
+dapr:
+  enabled: false
+
+secrets-router:
+  image:
+    pullPolicy: Always  # Test the default value
+  healthChecks:
+    liveness:
+      initialDelaySeconds: 5
+      periodSeconds: 10
+    readiness:
+      initialDelaySeconds: 2
+      periodSeconds: 3
+  env:
+    DEBUG_MODE: "true"
+    LOG_LEVEL: "DEBUG"
+
+sample-service:
+  restartPolicy: Never
+  clients:
+    python:
+      enabled: true
+    node:
+      enabled: false  # Test with disabled client
+    bash:
+      enabled: true

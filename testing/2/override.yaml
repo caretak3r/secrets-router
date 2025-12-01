@@ -1,17 +1,6 @@
-# Test 2: Cross-Namespace Access Test
-# Note: This test requires additional manual work since templates now use .Release.Namespace
-# Python client in test-namespace-2 needs to access secrets-router in test-namespace-1
-#
-# To test cross-namespace access with current design:
-# 1. Deploy test-1 with secrets-router in test-namespace-1
-# 2. Deploy test-2 with sample-service in test-namespace-2  
-# 3. Manually patch the python client environment or use direct kubectl commands
-
-sample-service:
-  clients:
-    python:
-      enabled: true     # Enable for testing
-    node:
-      enabled: false    # Reduce test complexity
-    bash:
-      enabled: false    # Reduce test complexity
+# Test 2: Cross-Namespace Testing
+# Use existing secrets-router from test-1, deploy sample services in test-2-clients namespace
+secrets-router:
+  enabled: false
+dapr:
+  enabled: false

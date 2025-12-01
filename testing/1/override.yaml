@@ -1,19 +1,6 @@
 # Test 1: Same Namespace Success Case
-# Test deployment - secrets router and python client in same namespace
-
-# Note: Sample service URLs and namespaces are now handled dynamically by templates
-# using .Release.Name and .Release.Namespace - no manual overrides needed
+# ONLY values that DIFFER from base chart defaults
 
 secrets-router:
   image:
     pullPolicy: Never  # Override base "Always" for local images
-  secretStores:
-    aws:
-      enabled: false   # Disable AWS for K8s-only testing
-
-sample-service:
-  clients:
-    node:
-      enabled: false    # Reduce test complexity
-    bash:
-      enabled: false    # Reduce test complexity
