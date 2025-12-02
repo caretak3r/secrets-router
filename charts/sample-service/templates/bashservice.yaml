@@ -19,10 +19,6 @@ spec:
           value: {{ include "sample-service.secretsRouterURL" . | quote }}
         - name: NAMESPACE
           value: {{ .Release.Namespace | quote }}
-        - name: TEST_SECRET_NAME
-          value: "sample-secret"
-        - name: TEST_SECRET_KEY
-          value: "password"
         {{- if .Values.secrets }}
         {{- range $secretKey, $secretPath := .Values.secrets }}
         - name: SECRET_{{ $secretKey | upper | replace "-" "_" }}

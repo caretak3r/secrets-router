@@ -1,14 +1,33 @@
 const axios = require('axios');
 
 const SECRETS_ROUTER_URL = process.env.SECRETS_ROUTER_URL || 'http://secrets-router:8080';
-const TEST_SECRET_NAME = process.env.TEST_SECRET_NAME || 'database-credentials';
-const TEST_SECRET_KEY = process.env.TEST_SECRET_KEY || 'password';
-const TEST_NAMESPACE = process.env.NAMESPACE; // Optional
+const NAMESPACE = process.env.NAMESPACE; // Optional
+
+// Discover configured secrets from environment variables
+function getConfiguredSecrets() {
+  const secrets = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (key.startsWith('SECRET_')) {
+      // Remove SECRET_ prefix and convert to lowercase for the secret name
+      const secretName = key.slice(7).toLowerCase().replace(/_/g, '-');
+      secrets[secretName] = value;
+    }
+  }
+  return secrets;
+}
 
 async function testSecretsRouter() {
   console.log('🔍 Testing Secrets Router service...');
   console.log(`Service URL: ${SECRETS_ROUTER_URL}`);
-  console.log(`Testing secret: ${TEST_SECRET_NAME}/${TEST_SECRET_KEY}`);
+  
+  const configuredSecrets = getConfiguredSecrets();
+  
+  if (Object.keys(configuredSecrets).length === 0) {
+    console.log('⚠️  No secrets configured. Set SECRET_* environment variables to test secret access.');
+    return;
+  }
+  
+  console.log(`Found ${Object.keys(configuredSecrets).length} configured secrets: ${Object.keys(configuredSecrets).join(', ')}`);
   
   try {
     // First test health endpoint
@@ -21,28 +40,30 @@ async function testSecretsRouter() {
     const readinessResponse = await axios.get(`${SECRETS_ROUTER_URL}/readyz`);
     console.log('✅ Readiness check:', readinessResponse.data);
     
-    // Test secret retrieval with and without namespace
-    console.log('\n🔑 Testing secret retrieval...');
-    
-    // Test without namespace (uses default)
-    try {
-      const secretUrl1 = `${SECRETS_ROUTER_URL}/secrets/${TEST_SECRET_NAME}/${TEST_SECRET_KEY}`;
-      console.log(`Requesting: GET ${secretUrl1}`);
-      const response1 = await axios.get(secretUrl1);
-      console.log('✅ Secret without namespace:', JSON.stringify(response1.data, null, 2));
-    } catch (error) {
-      console.log('❌ Request without namespace failed:', error.response?.data || error.message);
-    }
-    
-    // Test with namespace if provided
-    if (TEST_NAMESPACE) {
+    // Test each configured secret
+    for (const [secretName, secretPath] of Object.entries(configuredSecrets)) {
+      console.log(`\n🔑 Testing secret: ${secretName} -> ${secretPath}`);
+      
+      // Test without namespace
       try {
-        const secretUrl2 = `${SECRETS_ROUTER_URL}/secrets/${TEST_SECRET_NAME}/${TEST_SECRET_KEY}?namespace=${TEST_NAMESPACE}`;
-        console.log(`Requesting: GET ${secretUrl2}`);
-        const response2 = await axios.get(secretUrl2);
-        console.log('✅ Secret with namespace:', JSON.stringify(response2.data, null, 2));
+        const secretUrl = `${SECRETS_ROUTER_URL}/secrets/${secretPath}/value`;
+        console.log(`Requesting: GET ${secretUrl}`);
+        const response = await axios.get(secretUrl);
+        console.log('✅ Secret retrieved:', JSON.stringify(response.data, null, 2));
       } catch (error) {
-        console.log('❌ Request with namespace failed:', error.response?.data || error.message);
+        console.log('❌ Secret retrieval failed:', error.response?.data || error.message);
+      }
+      
+      // Test with namespace if provided
+      if (NAMESPACE) {
+        try {
+          const secretUrlWithNs = `${SECRETS_ROUTER_URL}/secrets/${secretPath}/value?namespace=${NAMESPACE}`;
+          console.log(`Requesting: GET ${secretUrlWithNs}`);
+          const response = await axios.get(secretUrlWithNs);
+          console.log('✅ Secret with namespace:', JSON.stringify(response.data, null, 2));
+        } catch (error) {
+          console.log('❌ Secret retrieval with namespace failed:', error.response?.data || error.message);
+        }
       }
     }
     

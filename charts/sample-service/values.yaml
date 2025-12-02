@@ -18,10 +18,6 @@ clients:
     env:
       - name: SECRETS_ROUTER_URL
         value: "http://secrets-router.dapr-control-plane.svc.cluster.local:8080"
-      - name: TEST_SECRET_NAME
-        value: "sample-secret"
-      - name: TEST_SECRET_KEY
-        value: "password"
       - name: NAMESPACE
         value: "dapr-control-plane"
   
@@ -32,10 +28,6 @@ clients:
     env:
       - name: SECRETS_ROUTER_URL
         value: "http://secrets-router.dapr-control-plane.svc.cluster.local:8080"
-      - name: TEST_SECRET_NAME
-        value: "sample-secret"
-      - name: TEST_SECRET_KEY
-        value: "password"
       - name: NAMESPACE
         value: "dapr-control-plane"
   
@@ -46,10 +38,6 @@ clients:
     env:
       - name: SECRETS_ROUTER_URL
         value: "http://secrets-router.dapr-control-plane.svc.cluster.local:8080"
-      - name: TEST_SECRET_NAME
-        value: "sample-secret"
-      - name: TEST_SECRET_KEY
-        value: "password"
       - name: NAMESPACE
         value: "dapr-control-plane"
 
