@@ -6,6 +6,8 @@ secrets-router:
   image:
     pullPolicy: Never  # Override base "Always"
   secretStores:
+    kubernetes:
+      enabled: false
     # Configuration for AWS Secrets Manager
     aws:
       enabled: false

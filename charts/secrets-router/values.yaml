@@ -105,6 +105,9 @@ ingress:
 # Secret Stores Configuration
 # Kubernetes Secrets are enabled by default
 secretStores:
+  # Configuration for Kubernetes secret store
+  kubernetes:
+    enabled: true
   # Configuration for AWS Secrets Manager
   aws:
     enabled: false
