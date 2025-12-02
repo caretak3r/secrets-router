@@ -6,12 +6,9 @@ Quick guide for developers consuming secrets from the Secrets Router service.
 
 ## Create Your Secrets
 
-Create Kubernetes secrets in the same namespace where your application will run:
+**Create Kubernetes secrets in the same namespace where your application will run and where secrets-router is running:**
 
 ```bash
-# Create namespace for your application
-kubectl create namespace my-app
-
 # Create secrets
 kubectl create secret generic db-credentials \
   --from-literal=host=postgres.example.com \
@@ -25,19 +22,7 @@ kubectl create secret generic api-keys \
   -n my-app
 
 # Verify secrets
-kubectl get secrets -n my-app
-```
-
-## Configure Your Service
-
-In your Helm chart's `values.yaml`, map the secrets your service needs:
-
-```yaml
-your-service:
-  enabled: true
-  secrets:
-    db-credentials: "db-credentials"    # Must match secret name in Kubernetes
-    api-keys: "api-keys"               # Must match secret name in Kubernetes
+kubectl get secrets -n someNamespace
 ```
 
 **Important**: The secret name in your code must match the key in the `secrets` map above.
@@ -46,7 +31,7 @@ your-service:
 
 Your service receives these environment variables automatically:
 - `SECRETS_ROUTER_URL`: URL for accessing secrets
-- `TEST_NAMESPACE`: Namespace where secrets are stored
+- `NAMESPACE`: Namespace where secrets are stored
 
 ### Python Example
 
@@ -56,7 +41,7 @@ import requests
 
 def get_secret(secret_name: str, secret_key: str) -> str:
     url = f"{os.getenv('SECRETS_ROUTER_URL')}/secrets/{secret_name}/{secret_key}"
-    response = requests.get(url, params={"namespace": os.getenv("TEST_NAMESPACE")})
+    response = requests.get(url, params={"namespace": os.getenv("NAMESPACE")})
     return response.json()["value"]
 
 # Usage
@@ -73,7 +58,7 @@ const http = require('http');
 function getSecret(secretName, secretKey) {
     return new Promise((resolve, reject) => {
         const url = `${process.env.SECRETS_ROUTER_URL}/secrets/${secretName}/${secretKey}`;
-        const req = http.get(`${url}?namespace=${process.env.TEST_NAMESPACE}`, (res) => {
+        const req = http.get(`${url}?namespace=${process.env.NAMESPACE}`, (res) => {
             let data = '';
             res.on('data', chunk => data += chunk);
             res.on('end', () => resolve(JSON.parse(data).value));
@@ -111,7 +96,7 @@ type SecretResponse struct {
 
 func getSecret(secretName, secretKey string) (string, error) {
     routerURL := os.Getenv("SECRETS_ROUTER_URL")
-    namespace := os.Getenv("TEST_NAMESPACE")
+    namespace := os.Getenv("NAMESPACE")
     
     url := fmt.Sprintf("%s/secrets/%s/%s?namespace=%s", 
         routerURL, secretName, secretKey, namespace)
@@ -155,6 +140,8 @@ func main() {
 ```
 GET /secrets/{secret_name}/{secret_key}?namespace={namespace}
 ```
+
+> For now the query parameter is optional, omitting this will default to checking for secrets in the same namespace in Kubernetes. Not applicable for AWS Secrets Manager. 
 
 **Response:**
 ```json

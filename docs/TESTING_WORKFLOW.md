@@ -73,7 +73,7 @@ The orchestrator executes exactly two test scenarios:
 - **Expected Result**: All services communicate successfully within the shared namespace
 - **Service Discovery**: Uses simplified service name `secrets-router` (not `{release-name}-secrets-router`)
 - **URL Format**: `http://secrets-router.{namespace}.svc.cluster.local:8080`
-- **Template Magic**: Environment variables `SECRETS_ROUTER_URL` and `TEST_NAMESPACE` auto-generated from `.Release.Namespace`
+- **Template Magic**: Environment variables `SECRETS_ROUTER_URL` and `NAMESPACE` auto-generated from `.Release.Namespace`
 
 #### Test 2: Cross-Namespace Documentation Case  
 - **Objective**: Document cross-namespace limitations with current simplified templates
@@ -122,7 +122,7 @@ sample-service:
     bash:
       enabled: false  # Override base "true" to disable
 
-# Note: SECRETS_ROUTER_URL and TEST_NAMESPACE are now auto-generated from .Release.Namespace
+# Note: SECRETS_ROUTER_URL and NAMESPACE are now auto-generated from .Release.Namespace
 # No manual env overrides needed for same-namespace deployments
 ```
 
@@ -350,10 +350,10 @@ kubectl exec -n test-namespace-1 $PYTHON_POD -- \
   curl -s "http://secrets-router.test-namespace-1.svc.cluster.local:8080/healthz"
 
 # Verify environment variables are correctly set from template
-kubectl exec -n test-namespace-1 $PYTHON_POD -- env | grep -E "(SECRETS_ROUTER_URL|TEST_NAMESPACE)"
+kubectl exec -n test-namespace-1 $PYTHON_POD -- env | grep -E "(SECRETS_ROUTER_URL|NAMESPACE)"
 # Expected output (validated in Phase 1 testing):
 # SECRETS_ROUTER_URL=http://secrets-router.test-namespace-1.svc.cluster.local:8080
-# TEST_NAMESPACE=test-namespace-1
+# NAMESPACE=test-namespace-1
 ```
 
 ## Step 5: Cross-Namespace Testing (Validated Manual Procedures)
@@ -408,7 +408,7 @@ helm install cross-namespace-clients ./charts/umbrella \
   --set sample-service.clients.python.enabled=true \
   --set sample-service.clients.python.env[0].name=SECRETS_ROUTER_URL \
   --set sample-service.clients.python.env[0].value=http://secrets-router.secrets-namespace.svc.cluster.local:8080 \
-  --set sample-service.clients.python.env[1].name=TEST_NAMESPACE \
+  --set sample-service.clients.python.env[1].name=NAMESPACE \
   --set sample-service.clients.python.env[1].value=client-namespace \
   --set sample-service.image.pullPolicy=Never
 
@@ -453,7 +453,7 @@ kubectl exec -n client-namespace deployment/sample-service-python -- \
 # Expected: http://secrets-router.secrets-namespace.svc.cluster.local:8080
 
 kubectl exec -n client-namespace deployment/sample-service-python -- \
-  env | grep TEST_NAMESPACE  
+  env | grep NAMESPACE  
 # Expected: client-namespace
 
 # Test cross-namespace secret retrieval
@@ -726,7 +726,7 @@ done
 - Override files contain only values that differ from base chart defaults (no manual env overrides for same-namespace)
 - Dapr sidecar injection and mTLS establishment verified via readiness probe
 - Service name is consistently `secrets-router` (not `{release-name}-secrets-router`)
-- Environment variables `SECRETS_ROUTER_URL` and `TEST_NAMESPACE` correctly derived from `.Release.Namespace`
+- Environment variables `SECRETS_ROUTER_URL` and `NAMESPACE` correctly derived from `.Release.Namespace`
 
 ## Performance and Health Notes
 

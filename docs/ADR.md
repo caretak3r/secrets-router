@@ -1423,7 +1423,7 @@ During the development and testing phases of the k8s-secrets-broker project, the
 **Key Simplifications**:
 - **Service Name**: Always `secrets-router` (never includes release name)
 - **Template Logic**: Use `.Release.Namespace` exclusively - no `targetNamespace` variations
-- **Environment Variables**: Auto-generated `SECRETS_ROUTER_URL` and `TEST_NAMESPACE`
+- **Environment Variables**: Auto-generated `SECRETS_ROUTER_URL` and `NAMESPACE`
 - **Cross-Namespace**: Manual configuration via environment variable override
 
 **Pros**:
@@ -1492,7 +1492,7 @@ metadata:
 env:
   - name: SECRETS_ROUTER_URL
     value: {{ include "sample-service.secretsRouterURL" . | quote }}
-  - name: TEST_NAMESPACE
+  - name: NAMESPACE
     value: {{ .Release.Namespace | quote }}
 ```
 
@@ -1502,7 +1502,7 @@ env:
 env:
   - name: SECRETS_ROUTER_URL  # Manual override needed
     value: http://secrets-router.shared-secrets.svc.cluster.local:8080
-  - name: TEST_NAMESPACE     # Still auto-generated
+  - name: NAMESPACE     # Still auto-generated
     value: {{ .Release.Namespace | quote }}
 ```
 
@@ -2067,7 +2067,7 @@ Based on production deployment data and developer feedback:
 env:
   - name: SECRETS_ROUTER_URL
     value: http://secrets-router.shared-secrets.svc.cluster.local:8080
-  - name: TEST_NAMESPACE
+  - name: NAMESPACE
     value: {{ .Release.Namespace | quote }}
 ```
 
@@ -2142,7 +2142,7 @@ metadata:
 env:
   - name: SECRETS_ROUTER_URL  # Auto-generated
     value: {{ include "sample-service.secretsRouterURL" . | quote }}
-  - name: TEST_NAMESPACE     # Auto-generated
+  - name: NAMESPACE     # Auto-generated
     value: {{ .Release.Namespace | quote }}
 ```
 
@@ -2152,7 +2152,7 @@ env:
 env:
   - name: SECRETS_ROUTER_URL  # Manual override required
     value: http://secrets-router.shared-secrets.svc.cluster.local:8080
-  - name: TEST_NAMESPACE     # Still auto-generated
+  - name: NAMESPACE     # Still auto-generated
     value: {{ .Release.Namespace | quote }}
 ```
 
@@ -3118,7 +3118,7 @@ During template development and testing, we identified complexity and potential 
 
 1. **Service Naming Complexity**: Using `{release-name}-secrets-router` pattern made service URLs unpredictable
 2. **Cross-Namespace Configuration**: Complex conditional logic for `.Values.targetNamespace` added unnecessary complexity
-3. **Override File Redundancy**: Users had to manually specify `SECRETS_ROUTER_URL` and `TEST_NAMESPACE` even for same-namespace deployments
+3. **Override File Redundancy**: Users had to manually specify `SECRETS_ROUTER_URL` and `NAMESPACE` even for same-namespace deployments
 4. **Template Maintenance**: Complex conditionals in `_helpers.tpl` made templates harder to understand and maintain
 
 The original approach used release-name-prefixed service names and supported configurable target namespaces, which:
@@ -3222,13 +3222,13 @@ metadata:
 env:
   - name: SECRETS_ROUTER_URL
     value: {{ include "sample-service.secretsRouterURL" . | quote }}
-  - name: TEST_NAMESPACE
+  - name: NAMESPACE
     value: {{ .Release.Namespace | quote }}
 ```
 
 **Simplified Override File (testing/1/override.yaml):**
 ```yaml
-# No manual SECRETS_ROUTER_URL or TEST_NAMESPACE needed for same-namespace
+# No manual SECRETS_ROUTER_URL or NAMESPACE needed for same-namespace
 secrets-router:
   image:
     pullPolicy: Never
@@ -3272,7 +3272,7 @@ sample-service:
 **For Existing Deployments:**
 
 1. Update service discovery URLs from `{release-name}-secrets-router` to `secrets-router`
-2. Remove manual `SECRETS_ROUTER_URL` and `TEST_NAMESPACE` from override files (auto-generated now)
+2. Remove manual `SECRETS_ROUTER_URL` and `NAMESPACE` from override files (auto-generated now)
 3. For cross-namespace access, manually set:
    ```bash
    kubectl set env deployment/<client> -n <client-namespace> \

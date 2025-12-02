@@ -104,7 +104,7 @@ The secrets-router service uses a **simplified, predictable naming scheme**:
 
 **Auto-Generated Environment Variables:**
 - `SECRETS_ROUTER_URL`: Derived from `.Release.Namespace`
-- `TEST_NAMESPACE`: Set to `.Release.Namespace`
+- `NAMESPACE`: Set to `.Release.Namespace`
 
 **Cross-Namespace Access:**
 - Same-namespace: Works automatically with template helpers
