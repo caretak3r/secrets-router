@@ -14,7 +14,7 @@ service:
 
 # Deployment configuration
 deployment:
-  replicas: 1
+  replicas: 2
   # Note: restartPolicy for Deployments is always 'Always' - included for completeness
   restartPolicy: Always
   resources:

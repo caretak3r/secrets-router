@@ -1,0 +1,73 @@
+---
+# Source: control-plane/charts/dapr/charts/dapr_scheduler/templates/dapr_scheduler_service.yaml
+kind: Service
+apiVersion: v1
+metadata:
+  name: dapr-scheduler-server-a
+  namespace: default
+  labels:
+    app: dapr-scheduler-server
+    app.kubernetes.io/component: scheduler
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: control-plane
+    app.kubernetes.io/part-of: dapr
+    app.kubernetes.io/version: 1.16.3
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    prometheus.io/path: "/"
+spec:
+  selector:
+    app: dapr-scheduler-server
+  # scheduler must be able to resolve pod address to join initial cluster peers
+  # before POD is ready
+  publishNotReadyAddresses: true
+  ports:
+  - name: api
+    port: 443
+    targetPort: 50006
+  - name: etcd-client
+    port: 2379
+  - name: etcd-peer
+    port: 2380
+  - name: metrics
+    port: 9090
+    targetPort: 9090
+    protocol: TCP
+  type: ClusterIP
+---
+# Source: control-plane/charts/dapr/charts/dapr_scheduler/templates/dapr_scheduler_service.yaml
+kind: Service
+apiVersion: v1
+metadata:
+  name: dapr-scheduler-server
+  namespace: default
+  labels:
+    app: dapr-scheduler-server
+    app.kubernetes.io/component: scheduler
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: control-plane
+    app.kubernetes.io/part-of: dapr
+    app.kubernetes.io/version: 1.16.3
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    prometheus.io/path: "/"
+spec:
+  selector:
+    app: dapr-scheduler-server
+  # scheduler must be able to resolve pod address to join initial cluster peers
+  # before POD is ready
+  publishNotReadyAddresses: true
+  ports:
+  - name: api
+    port: 50006
+  - name: etcd-client
+    port: 2379
+  - name: etcd-peer
+    port: 2380
+  - name: metrics
+    port: 9090
+    targetPort: 9090
+    protocol: TCP
+  clusterIP: None # make the service headless

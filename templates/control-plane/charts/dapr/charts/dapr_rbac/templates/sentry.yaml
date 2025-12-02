@@ -1,0 +1,101 @@
+---
+# Source: control-plane/charts/dapr/charts/dapr_rbac/templates/sentry.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dapr-sentry
+  namespace: default
+  labels:
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: control-plane
+    app.kubernetes.io/part-of: dapr
+    app.kubernetes.io/version: 1.16.3
+---
+# Source: control-plane/charts/dapr/charts/dapr_rbac/templates/sentry.yaml
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: dapr-sentry
+  labels:
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: control-plane
+    app.kubernetes.io/part-of: dapr
+    app.kubernetes.io/version: 1.16.3
+rules:
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+  - apiGroups: ["dapr.io"]
+    resources: ["configurations"]
+    verbs: ["list", "get", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list", "get", "watch"]
+---
+# Source: control-plane/charts/dapr/charts/dapr_rbac/templates/sentry.yaml
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: dapr-sentry
+  labels:
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: control-plane
+    app.kubernetes.io/part-of: dapr
+    app.kubernetes.io/version: 1.16.3
+subjects:
+- kind: ServiceAccount
+  name: dapr-sentry
+  namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: dapr-sentry
+---
+# Source: control-plane/charts/dapr/charts/dapr_rbac/templates/sentry.yaml
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: dapr-sentry
+  namespace: default
+  labels:
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: control-plane
+    app.kubernetes.io/part-of: dapr
+    app.kubernetes.io/version: 1.16.3
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "update","delete"]
+    resourceNames: ["dapr-trust-bundle"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "update", "watch", "list"]
+    resourceNames: ["dapr-trust-bundle"]
+  - apiGroups: ["dapr.io"]
+    resources: ["configurations"]
+    verbs: ["list", "get", "watch"]
+---
+# Source: control-plane/charts/dapr/charts/dapr_rbac/templates/sentry.yaml
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: dapr-sentry
+  namespace: default
+  labels:
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: control-plane
+    app.kubernetes.io/part-of: dapr
+    app.kubernetes.io/version: 1.16.3
+subjects:
+- kind: ServiceAccount
+  name: dapr-sentry
+  namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: dapr-sentry

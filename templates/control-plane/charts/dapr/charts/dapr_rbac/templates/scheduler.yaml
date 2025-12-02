@@ -1,0 +1,49 @@
+---
+# Source: control-plane/charts/dapr/charts/dapr_rbac/templates/scheduler.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dapr-scheduler
+  namespace: default
+  labels:
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: control-plane
+    app.kubernetes.io/part-of: dapr
+    app.kubernetes.io/version: 1.16.3
+---
+# Source: control-plane/charts/dapr/charts/dapr_rbac/templates/scheduler.yaml
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: dapr-scheduler
+  labels:
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: control-plane
+    app.kubernetes.io/part-of: dapr
+    app.kubernetes.io/version: 1.16.3
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch"]
+---
+# Source: control-plane/charts/dapr/charts/dapr_rbac/templates/scheduler.yaml
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: dapr-scheduler
+  labels:
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: control-plane
+    app.kubernetes.io/part-of: dapr
+    app.kubernetes.io/version: 1.16.3
+subjects:
+- kind: ServiceAccount
+  name: dapr-scheduler
+  namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: dapr-scheduler

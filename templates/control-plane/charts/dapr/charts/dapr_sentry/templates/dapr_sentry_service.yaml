@@ -1,0 +1,30 @@
+---
+# Source: control-plane/charts/dapr/charts/dapr_sentry/templates/dapr_sentry_service.yaml
+kind: Service
+apiVersion: v1
+metadata:
+  name: dapr-sentry
+  namespace: default
+  labels:
+    app.kubernetes.io/component: sentry
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: control-plane
+    app.kubernetes.io/part-of: dapr
+    app.kubernetes.io/version: 1.16.3
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    prometheus.io/path: "/"
+spec:
+  selector:
+    app: dapr-sentry
+  type: ClusterIP
+  ports:
+  - protocol: TCP
+    port: 443
+    targetPort: 50001
+    name: grpc
+  - name: metrics
+    port: 9090
+    targetPort: 9090
+    protocol: TCP

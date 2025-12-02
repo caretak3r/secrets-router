@@ -1,12 +1,12 @@
 dependencies:
 - name: dapr
   repository: https://dapr.github.io/helm-charts/
-  version: 1.16.0
+  version: 1.16.3
 - name: secrets-router
   repository: file://../secrets-router
   version: 1.0.2
 - name: sample-service
   repository: file://../sample-service
   version: 1.0.1
-digest: sha256:f31da62f0bc831c068864935c7052bfc4031df954464c96cceb34596a21a4d7c
-generated: "2025-12-02T06:36:48.924919-05:00"
+digest: sha256:b5b8e1c09ec2f60a37e48d1aa91eab691e433b7a945ccd635227dce7293466c0
+generated: "2025-12-02T07:09:35.382451-05:00"

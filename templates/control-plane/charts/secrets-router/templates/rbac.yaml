@@ -1,0 +1,87 @@
+---
+# Source: control-plane/charts/secrets-router/templates/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: control-plane-secrets-router-cluster
+  labels:
+    helm.sh/chart: secrets-router-1.0.2
+    app.kubernetes.io/name: secrets-router
+    app.kubernetes.io/instance: control-plane
+    app.kubernetes.io/version: "1.0.2"
+    app.kubernetes.io/managed-by: Helm
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list"]
+  resourceNames: []
+- apiGroups: [""]
+  resources: ["services"]
+  verbs: ["get", "list"]
+- apiGroups: ["admissionregistration.k8s.io"]
+  resources: ["mutatingwebhookconfigurations"]
+  verbs: ["get", "list"]
+---
+# Source: control-plane/charts/secrets-router/templates/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: control-plane-secrets-router-cluster
+  labels:
+    helm.sh/chart: secrets-router-1.0.2
+    app.kubernetes.io/name: secrets-router
+    app.kubernetes.io/instance: control-plane
+    app.kubernetes.io/version: "1.0.2"
+    app.kubernetes.io/managed-by: Helm
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: control-plane-secrets-router-cluster
+subjects:
+- kind: ServiceAccount
+  name: secrets-router
+  namespace: default
+---
+# Source: control-plane/charts/secrets-router/templates/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: control-plane-secrets-router
+  namespace: default
+  labels:
+    helm.sh/chart: secrets-router-1.0.2
+    app.kubernetes.io/name: secrets-router
+    app.kubernetes.io/instance: control-plane
+    app.kubernetes.io/version: "1.0.2"
+    app.kubernetes.io/managed-by: Helm
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["services"]
+  verbs: ["get", "list"]
+- apiGroups: ["admissionregistration.k8s.io"]
+  resources: ["mutatingwebhookconfigurations"]
+  verbs: ["get", "list"]
+---
+# Source: control-plane/charts/secrets-router/templates/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: control-plane-secrets-router
+  namespace: default
+  labels:
+    helm.sh/chart: secrets-router-1.0.2
+    app.kubernetes.io/name: secrets-router
+    app.kubernetes.io/instance: control-plane
+    app.kubernetes.io/version: "1.0.2"
+    app.kubernetes.io/managed-by: Helm
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: control-plane-secrets-router
+subjects:
+- kind: ServiceAccount
+  name: secrets-router
+  namespace: default

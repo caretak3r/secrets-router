@@ -1,0 +1,133 @@
+---
+# Source: control-plane/charts/secrets-router/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: control-plane-secrets-router
+  namespace: default
+  labels:
+    helm.sh/chart: secrets-router-1.0.2
+    app.kubernetes.io/name: secrets-router
+    app.kubernetes.io/instance: control-plane
+    app.kubernetes.io/version: "1.0.2"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: secrets-router
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: secrets-router
+      app.kubernetes.io/instance: control-plane
+  template:
+    metadata:
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "secrets-router"
+        dapr.io/app-port: "8080"
+        dapr.io/log-level: "info"
+        dapr.io/enable-api-logging: "false"
+        # Dapr component scoping - allow access to components in same namespace
+        dapr.io/component-scope: "default"
+      labels:
+        app.kubernetes.io/name: secrets-router
+        app.kubernetes.io/instance: control-plane
+    spec:
+      # Note: restartPolicy for Deployments is always 'Always' and cannot be overridden
+      restartPolicy: Always
+      serviceAccountName: secrets-router
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+      - name: wait-for-dapr-injector
+        image: bitnami/kubectl:latest
+        command:
+        - /bin/sh
+        - -c
+        - |
+          echo "Waiting for Dapr sidecar injector to be ready..."
+          # Wait for the mutating webhook to be ready
+          until kubectl get mutatingwebhookconfiguration dapr-sidecar-injector -o jsonpath='{.webhooks[0].clientConfig.service.name}' 2>/dev/null | grep -q "dapr-sidecar-injector"; do
+            echo "Dapr sidecar injector webhook not ready yet, waiting 5 seconds..."
+            sleep 5
+          done
+          
+          # Wait for the injector service to be ready
+          until kubectl get service dapr-sidecar-injector -o jsonpath='{.spec.clusterIP}' 2>/dev/null | grep -v "None"; do
+            echo "Dapr sidecar injector service not ready yet, waiting 5 seconds..."
+            sleep 5
+          done
+          
+          echo "Dapr sidecar injector is ready! Proceeding with pod startup."
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            cpu: 50m
+            memory: 32Mi
+      containers:
+      - name: secrets-router
+        image: "secrets-router:latest"
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        env:
+        - name: DAPR_HTTP_PORT
+          value: "3500"
+        - name: DEBUG_MODE
+          value: "false"
+        - name: LOG_LEVEL
+          value: "INFO"
+        - name: SERVER_PORT
+          value: "8080"
+        - name: SERVICE_VERSION
+          value: "1.0.2"
+        - name: AWS_SECRETS_ENABLED
+          value: "false"
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 3
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 6
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 12
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL

@@ -1,0 +1,21 @@
+---
+# Source: control-plane/charts/secrets-router/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: secrets-router
+  namespace: default
+  labels:
+    app.kubernetes.io/name: secrets-router
+    app.kubernetes.io/instance: control-plane
+    app.kubernetes.io/managed-by: Helm
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: secrets-router
+    app.kubernetes.io/instance: control-plane

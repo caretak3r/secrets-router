@@ -1,0 +1,30 @@
+---
+# Source: control-plane/charts/dapr/charts/dapr_sidecar_injector/templates/dapr_sidecar_injector_service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: dapr-sidecar-injector
+  namespace: default
+  labels:
+    app.kubernetes.io/component: sidecar-injector
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: control-plane
+    app.kubernetes.io/part-of: dapr
+    app.kubernetes.io/version: 1.16.3
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    prometheus.io/path: "/"
+spec:
+  selector:
+    app: dapr-sidecar-injector
+  type: ClusterIP
+  ports:
+  - port: 443
+    targetPort: https
+    protocol: TCP
+    name: https
+  - name: metrics
+    port: 9090
+    targetPort: 9090
+    protocol: TCP
