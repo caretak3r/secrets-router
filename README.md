@@ -294,14 +294,79 @@ control-plane-umbrella (umbrella chart)
     └── Bash client
 ```
 
-### Secret Backend
+## Secret Backend
 
-**Kubernetes Secrets**
+### Option 1: Kubernetes Secrets (Default)
 - **Location**: Same namespace as your application and Secrets Router
 - **Format**: Standard Kubernetes secret objects
 - **Auto-Decoding**: Yes (base64 → plain text)
 - **Namespace Isolation**: Secrets are scoped to single namespace deployment
 - **Simplicity**: No additional configuration required
+
+### Option 2: AWS Secrets Manager
+You can also use AWS Secrets Manager as your secret backend instead of Kubernetes secrets.
+
+**Prerequisites:**
+- AWS IAM Roles for Service Accounts (IRSA) or alternative pod identity mechanism
+- AWS Secrets Manager access permissions for the pod identity
+- AWS region where your secrets are stored
+
+**Setup Steps:**
+
+1. **Create IAM Policy for Secrets Manager Access:**
+   ```bash
+   aws iam create-policy \
+     --policy-name SecretsManagerReadPolicy \
+     --policy-document '{
+       "Version": "2012-10-17",
+       "Statement": [
+         {
+           "Effect": "Allow",
+           "Action": [
+             "secretsmanager:GetSecretValue",
+             "secretsmanager:DescribeSecret"
+           ],
+           "Resource": "arn:aws:secretsmanager:*:*:secret:*"
+         }
+       ]
+     }'
+   ```
+
+2. **Create IAM Service Account and Attach Policy:**
+   ```bash
+   eksctl create iamserviceaccount \
+     --cluster my-cluster \
+     --namespace production \
+     --name secrets-router \
+     --attach-policy-arn arn:aws:iam::ACCOUNT:policy/SecretsManagerReadPolicy \
+     --approve \
+     --override-existing-serviceaccounts
+   ```
+
+3. **Configure secrets-router for AWS:**
+   ```yaml
+   # In your override.yaml
+   secrets-router:
+     secretStores:
+       aws:
+         enabled: true
+         region: "us-east-1"  # Your AWS region
+         multipleKeyValuesPerSecret: false  # true if secrets contain multiple key-value pairs
+   ```
+
+4. **Update Service Configuration to Use AWS Secrets Manager:**
+   ```yaml
+   sample-service-python:
+     secrets:
+       rds-credentials: "prod/db-credentials"  # AWS Secrets Manager name/path
+       api-keys: "prod/api-keys"
+   ```
+
+**Key Differences:**
+- **Secret Names**: Use AWS Secrets Manager secret names/paths instead of Kubernetes secret names
+- **Pod Identity**: Required for authentication (IRSA recommended)
+- **Region Configuration**: Must specify AWS region where secrets are stored
+- **Multi-value Secrets**: Set `multipleKeyValuesPerSecret: true` if your AWS secrets contain multiple key-value pairs
 
 ## Documentation
 
