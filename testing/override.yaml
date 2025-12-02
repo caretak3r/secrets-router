@@ -5,14 +5,6 @@
 secrets-router:
   image:
     pullPolicy: Never  # Override base "Always"
-  healthChecks:
-    liveness:
-      initialDelaySeconds: 30
-    readiness:
-      initialDelaySeconds: 15
-    startupProbe:
-      initialDelaySeconds: 15
-      failureThreshold: 30
   secretStores:
     # Configuration for AWS Secrets Manager
     aws:

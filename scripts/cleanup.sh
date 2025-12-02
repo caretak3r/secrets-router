@@ -225,23 +225,22 @@ if command -v jq >/dev/null 2>&1; then
     echo "  [DEBUG] All CRDs in cluster: $(echo "$all_crds" | jq -r '.items[].metadata.name' 2>/dev/null | tr '\n' ' ' || echo 'none')"
     echo "  [DEBUG] CRDs with dapr.io group: $(echo "$dapr_crds" | tr '\n' ' ' || echo 'none')"
 else
-    # Fallback to text processing
+    # Fallback to text processing - check for names ending with .dapr.io
     all_crds_text=$(kubectl get crd --no-headers 2>/dev/null || echo "")
     echo "  [DEBUG] CRDs in cluster: $(echo "$all_crds_text" | head -5 | wc -l) total"
-    dapr_crds=$(echo "$all_crds_text" | awk '$2 == "dapr.io" {print $1}' 2>/dev/null || true)
+    dapr_crds=$(echo "$all_crds_text" | awk '{print $1}' | grep 'dapr.io$' 2>/dev/null || true)
     echo "  [DEBUG] dapr.io CRDs found: $(echo "$dapr_crds" | tr '\n' ' ' || echo 'none')"
 fi
 
 if [[ -n "$dapr_crds" ]]; then
-    # Convert to array and iterate
-    IFS=$'\n' read -r -a crd_array <<< "$dapr_crds"
+    # Convert to string to array properly
+    crd_array=($dapr_crds)
     log_info "  Found ${#crd_array[@]} CRDs with dapr.io group:"
     for crd in "${crd_array[@]}"; do
         if [[ -n "$crd" ]]; then
             log_info "  - $crd (will be deleted if --delete-crds is specified)"
             resources_found=true
             crds_found=true
-            dapr_crds+=("$crd")
         fi
     done
 else
@@ -325,15 +324,37 @@ else
 fi
 
 # Step 4: Remove Dapr CRDs (if requested)
-if [[ "$DELETE_CRDS" == "true" && ${#dapr_crds[@]} -gt 0 ]]; then
-    log_info "Step 4: Removing Dapr CRDs (${#dapr_crds[@]} found)"
-    for crd in "${dapr_crds[@]}"; do
-        if [[ -n "$crd" ]]; then
-            dry_run_exec "kubectl delete crd $crd --ignore-not-found=true" "Delete CRD $crd"
-        fi
-    done
-elif [[ "$DELETE_CRDS" == "true" ]]; then
-    log_info "Step 4: Skipping Dapr CRD deletion (no Dapr CRDs found)"
+if [[ "$DELETE_CRDS" == "true" ]]; then
+    log_info "Step 4: Removing all Dapr CRDs"
+    
+    # Get all CRDs with dapr.io group using kubectl directly to ensure we catch all
+    all_dapr_crds=$(kubectl get crd --no-headers 2>/dev/null | awk '{print $1}' | grep 'dapr.io$' || true)
+    
+    if [[ -n "$all_dapr_crds" ]]; then
+        log_info "Found Dapr CRDs to delete:"
+        crd_array=($all_dapr_crds)
+        for crd in "${crd_array[@]}"; do
+            if [[ -n "$crd" ]]; then
+                log_info "  - $crd"
+                dry_run_exec "kubectl delete crd $crd --ignore-not-found=true" "Delete CRD $crd"
+            fi
+        done
+    else
+        log_info "No Dapr CRDs found to delete"
+    fi
+    
+    # Also try to delete from the array we collected earlier (backup method)
+    if [[ ${#dapr_crds[@]} -gt 0 ]]; then
+        log_info "Checking additional CRDs from discovery:"
+        for crd in "${dapr_crds[@]}"; do
+            if [[ -n "$crd" ]]; then
+                # Only delete if not already deleted
+                if kubectl get crd "$crd" &>/dev/null; then
+                    dry_run_exec "kubectl delete crd $crd --ignore-not-found=true" "Delete CRD $crd (backup)"
+                fi
+            fi
+        done
+    fi
 else
     log_info "Step 4: Skipping Dapr CRD deletion (use --delete-crds to remove them)"
 fi
