@@ -13,33 +13,18 @@ service:
 clients:
   node:
     enabled: true
-    image: sample-node-service
+    image: sample-node
     pullPolicy: Never
-    env:
-      - name: SECRETS_ROUTER_URL
-        value: "http://secrets-router.dapr-control-plane.svc.cluster.local:8080"
-      - name: NAMESPACE
-        value: "dapr-control-plane"
   
   python:
     enabled: true
-    image: sample-python-service
+    image: sample-python
     pullPolicy: Never
-    env:
-      - name: SECRETS_ROUTER_URL
-        value: "http://secrets-router.dapr-control-plane.svc.cluster.local:8080"
-      - name: NAMESPACE
-        value: "dapr-control-plane"
   
   bash:
     enabled: true
-    image: sample-bash-service
+    image: sample-bash
     pullPolicy: Never
-    env:
-      - name: SECRETS_ROUTER_URL
-        value: "http://secrets-router.dapr-control-plane.svc.cluster.local:8080"
-      - name: NAMESPACE
-        value: "dapr-control-plane"
 
 resources:
   limits:
