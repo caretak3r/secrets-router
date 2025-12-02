@@ -2,123 +2,152 @@
 
 Quick guide for developers consuming secrets from the Secrets Router service.
 
-## Prerequisite: Create Your Secrets
+**Prerequisites**: Secrets Router and DAPR are already installed on your cluster.
 
-**Important**: You must create your Kubernetes secrets in the same namespace where you'll deploy the Secrets Router before installing the Helm chart. The Secrets Router service retrieves existing secrets but does not create them.
+## Create Your Secrets
 
-### Create Kubernetes Secrets
-
-Create your secrets in the namespace where you'll deploy the Secrets Router:
+Create Kubernetes secrets in the same namespace where your application will run:
 
 ```bash
-# 1. Create your namespace (if it doesn't exist)
-kubectl create namespace production
+# Create namespace for your application
+kubectl create namespace my-app
 
-# 2. Create Kubernetes secrets in the same namespace
-kubectl create secret generic rds-credentials \
-  --from-literal=host=db.example.com \
+# Create secrets
+kubectl create secret generic db-credentials \
+  --from-literal=host=postgres.example.com \
   --from-literal=username=admin \
   --from-literal=password=secretpassword \
-  --from-literal=database=production \
-  -n production
+  -n my-app
 
 kubectl create secret generic api-keys \
-  --from-literal=key1=value1 \
-  --from-literal=key2=value2 \
-  -n production
+  --from-literal=stripe-key=sk_test_12345 \
+  --from-literal=jwt-secret=your-jwt-secret \
+  -n my-app
 
-# 3. Verify secrets exist
-kubectl get secrets -n production
+# Verify secrets
+kubectl get secrets -n my-app
 ```
 
-**Key Point**: All secrets must exist in the same namespace where you deploy the Secrets Router and your applications.
+## Configure Your Service
 
-## Quick Start
-
-### 1. Prepare Your Configuration
-
-In your `values.yaml` override file, reference the Kubernetes secrets you created:
+In your Helm chart's `values.yaml`, map the secrets your service needs:
 
 ```yaml
-# For Python service - reference your actual secret names
-sample-service-python:
+your-service:
   enabled: true
   secrets:
-    rds-credentials: "rds-credentials"           # Kubernetes secret name you created
-    api-keys: "api-keys"                        # API keys secret you created
-
-# For Node service  
-sample-service-node:
-  enabled: true
-  secrets:
-    rds-credentials: "rds-credentials"           # Same secret (can be reused)
-    redis-password: "redis-credentials"         # Different secret
-
-# For Bash service
-sample-service-bash:
-  enabled: true
-  secrets:
-    rds-credentials: "rds-credentials"           # Reused across services
-    shell-password: "shell-credentials"         # Shell access secret
+    db-credentials: "db-credentials"    # Must match secret name in Kubernetes
+    api-keys: "api-keys"               # Must match secret name in Kubernetes
 ```
 
-**Key Points:**
-- **Secret Name**: Use the exact Kubernetes secret name you created
-- **Reference Keys**: These are names your application code will use
-- **Reuse Allowed**: Multiple services can reference the same secret
-- **Namespace**: All secrets must be in the same namespace as the Secrets Router
+**Important**: The secret name in your code must match the key in the `secrets` map above.
 
-### 2. Deploy Secrets Router
+## Access Secrets in Your Code
 
-```bash
-# Build and deploy
-make docker-build-all
-helm install my-release ./charts/umbrella --create-namespace -n production -f your-values.yaml
-```
+Your service receives these environment variables automatically:
+- `SECRETS_ROUTER_URL`: URL for accessing secrets
+- `TEST_NAMESPACE`: Namespace where secrets are stored
 
-### 3. Access Secrets in Your Application
-
-Your applications access secrets via HTTP requests to the secrets-router service. Use the secret names you configured in the values.yaml:
+### Python Example
 
 ```python
 import os
 import requests
 
-def get_secret(secret_name: str, secret_key: str = "value") -> str:
-    """Get secret value from Secrets Router."""
-    secrets_router_url = os.getenv("SECRETS_ROUTER_URL")
-    namespace = os.getenv("TEST_NAMESPACE")
-    
-    url = f"{secrets_router_url}/secrets/{secret_name}/{secret_key}"
-    response = requests.get(url, params={"namespace": namespace})
+def get_secret(secret_name: str, secret_key: str) -> str:
+    url = f"{os.getenv('SECRETS_ROUTER_URL')}/secrets/{secret_name}/{secret_key}"
+    response = requests.get(url, params={"namespace": os.getenv("TEST_NAMESPACE")})
     return response.json()["value"]
 
-# Example usage with secret names from umbrella values.yaml
-def get_database_credentials():
-    """Get RDS credentials using the secret name from configuration."""
-    if not get_secret("rds-credentials", "host"):
-        raise ValueError("Secret 'rds-credentials' not found")
-    
-    return {
-        "host": get_secret("rds-credentials", "host"),
-        "username": get_secret("rds-credentials", "username"), 
-        "password": get_secret("rds-credentials", "password"),
-        "database": get_secret("rds-credentials", "database")
-    }
-
-def get_api_keys():
-    """Get API keys from Kubernetes secret."""
-    return get_secret("api-keys", "value")
-
 # Usage
-try:
-    db_creds = get_database_credentials()
-    print(f"Connecting to database: {db_creds['database']}")
+db_host = get_secret("db-credentials", "host")
+db_password = get_secret("db-credentials", "password")
+stripe_key = get_secret("api-keys", "stripe-key")
+```
+
+### Node.js Example
+
+```javascript
+const http = require('http');
+
+function getSecret(secretName, secretKey) {
+    return new Promise((resolve, reject) => {
+        const url = `${process.env.SECRETS_ROUTER_URL}/secrets/${secretName}/${secretKey}`;
+        const req = http.get(`${url}?namespace=${process.env.TEST_NAMESPACE}`, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => resolve(JSON.parse(data).value));
+        });
+        req.on('error', reject);
+    });
+}
+
+// Usage
+async function main() {
+    const dbHost = await getSecret("db-credentials", "host");
+    const dbPassword = await getSecret("db-credentials", "password");
+    const stripeKey = await getSecret("api-keys", "stripe-key");
     
-    api_keys = get_api_keys()
-    print(f"Retrieved API keys")
-except Exception as e:
-    print(f"Error accessing secret: {e}")
+    console.log(`DB Host: ${dbHost}`);
+}
+```
+
+### Go Example
+
+```go
+package main
+
+import (
+    "encoding/json"
+    "fmt"
+    "io"
+    "net/http"
+    "os"
+)
+
+type SecretResponse struct {
+    Value string `json:"value"`
+}
+
+func getSecret(secretName, secretKey string) (string, error) {
+    routerURL := os.Getenv("SECRETS_ROUTER_URL")
+    namespace := os.Getenv("TEST_NAMESPACE")
+    
+    url := fmt.Sprintf("%s/secrets/%s/%s?namespace=%s", 
+        routerURL, secretName, secretKey, namespace)
+    
+    resp, err := http.Get(url)
+    if err != nil {
+        return "", err
+    }
+    defer resp.Body.Close()
+    
+    body, err := io.ReadAll(resp.Body)
+    if err != nil {
+        return "", err
+    }
+    
+    var secretResp SecretResponse
+    if err := json.Unmarshal(body, &secretResp); err != nil {
+        return "", err
+    }
+    
+    return secretResp.Value, nil
+}
+
+func main() {
+    dbHost, err := getSecret("db-credentials", "host")
+    if err != nil {
+        panic(err)
+    }
+    
+    dbPassword, err := getSecret("db-credentials", "password")
+    if err != nil {
+        panic(err)
+    }
+    
+    fmt.Printf("DB Host: %s\n", dbHost)
+}
 ```
 
 ## API Endpoint
@@ -127,189 +156,33 @@ except Exception as e:
 GET /secrets/{secret_name}/{secret_key}?namespace={namespace}
 ```
 
-**Parameters:**
-- `secret_name`: Name of the secret (e.g., "rds-credentials")
-- `secret_key`: Key within the secret (e.g., "password")
-- `namespace`: Kubernetes namespace where the secret lives
-
 **Response:**
 ```json
 {
   "backend": "kubernetes-secrets",
-  "secret_name": "database-credentials", 
+  "secret_name": "db-credentials", 
   "secret_key": "password",
-  "value": "secret123"  // Always decoded and ready to use
+  "value": "secretpassword"
 }
 ```
 
-## Common Commands
+## Troubleshooting Secret Access
+
+Test if your secrets are accessible:
 
 ```bash
-# Build all containers
-make docker-build-all
+# Test from any pod in the same namespace
+kubectl exec -it <your-pod> -n my-app -- \
+  curl "http://secrets-router:8080/secrets/db-credentials/password?namespace=my-app"
 
-# Deploy with custom secrets
-helm upgrade my-release ./charts/umbrella -f my-secrets.yaml -n my-namespace
+# Check if secret exists
+kubectl get secret db-credentials -n my-app
 
-# Check deployment status
-kubectl get pods -n my-namespace
-kubectl logs -n my-namespace -l app.kubernetes.io/name=secrets-router
-
-# Test secret access
-kubectl exec -it <pod> -n my-namespace -- \
-  curl "http://secrets-router:8080/secrets/my-secret/my-key?namespace=my-namespace"
-```
-
-## Configuration
-
-### Secret Store Setup
-
-**No Manual Configuration Required**: The Secrets Router automatically accesses Kubernetes secrets in the same namespace where your services are deployed.
-
-- **Kubernetes Secrets**: All secrets must be created in the same namespace as the Secrets Router
-- **No Additional Setup**: Works out of the box with standard Kubernetes secrets
-- **Single Namespace**: Simplified deployment model reduces configuration complexity
-
-### Service Configuration
-
-The umbrella chart sets up each service with just the essential environment variables:
-
-#### Environment Variables
-
-Each service receives only these core environment variables:
-
-- `SECRETS_ROUTER_URL`: URL of the secrets router service
-- `TEST_NAMESPACE`: Kubernetes namespace where secrets are stored
-
-#### Service Configuration Examples
-
-```yaml
-# Python service
-sample-service-python:
-  enabled: true
-  secrets:
-    rds-credentials: "prod-db-credentials"           # Kubernetes secret name
-    api-keys: "api-keys"                            # API keys secret
-  
-# Node service
-sample-service-node:
-  enabled: true
-  secrets:
-    redis-password: "redis-cluster-prod"            # Redis credentials secret
-    jwt-secret: "jwt-credentials"                    # JWT token secret
-
-# Bash service with shell credentials
-sample-service-bash:
-  enabled: true
-  secrets:
-    rds-credentials: "prod-db-credentials"
-    shell-password: "shell-credentials"
-```
-
-Services make HTTP requests to the secrets-router using the secret names configured above. All secrets must be Kubernetes secrets in the same namespace as the deployedservices.
-
-## Build Commands
-
-```bash
-# Build all containers
-make docker-build-all
-
-# Build only secrets-router
-make docker-build-secrets-router
-
-# Build only sample services
-make docker-build-samples
-
-# Package Helm charts
-make helm-package
-```
-
-## Troubleshooting
-
-### Secret Not Found (404)
-1. **Verify Secret Creation**: Ensure you created the secret in the deployment namespace:
-   ```bash
-   kubectl get secret rds-credentials -n production
-   ```
-2. **Check Configuration**: Verify the secret name in your values.yaml matches exactly what you created
-3. **Namespace Match**: Ensure all secrets are in the same namespace where you deploy the Secrets Router
-4. **Test Access**: Try accessing the secret directly from a pod to verify connectivity
-5. **Upgrade if Needed**: Update your Helm release if configuration changes were made
-6. **List All Secrets**: Check what secrets are available in the namespace:
-   ```bash
-   kubectl get secrets -n production
-   ```
-
-### Connection Issues
-```bash
-# Test connectivity from service pod
-kubectl exec -it <sample-pod> -n my-namespace -- \
-  curl http://secrets-router.dapr-control-plane.svc.cluster.local:8080/healthz
-
-# Check secrets router logs  
+# Check secrets-router logs
 kubectl logs -n dapr-control-plane -l app.kubernetes.io/name=secrets-router
 ```
 
-### Dapr Issues
-```bash
-# Check Dapr status
-kubectl get pods -n dapr-system
-kubectl get components -n dapr-control-plane
-
-# Verify Dapr sidecar is running
-kubectl get pods -n my-namespace -o wide | grep dapr
-```
-
-### Template Rendering Issues
-```bash
-# Test template rendering before deployment
-helm template ./charts/umbrella --dry-run=client -f your-values.yaml
-
-# Verify sample service manifests
-helm template ./charts/umbrella --dry-run=client -f your-values.yaml | grep -A 20 "sample-service"
-```
-
-## Development and Testing Workflow
-
-### Step-by-Step Testing Process
-
-1. **Create Test Secrets** (Prerequisite)
-   ```bash
-   # Create namespace for testing
-   kubectl create namespace test-namespace
-   
-   # Create test Kubernetes secret
-   kubectl create secret generic test-secret \
-     --from-literal=password=testpass123 \
-     --from-literal=username=testuser \
-     -n test-namespace
-   ```
-
-2. **Configure Your Service** 
-   ```yaml
-   sample-service-python:
-     enabled: true
-     secrets:
-       test-secret: "test-secret"  # Reference to the secret you created
-   ```
-
-3. **Deploy and Test**
-   ```bash
-   # Deploy the umbrella chart
-   helm install test-release ./charts/umbrella \
-     --create-namespace -n test-namespace \
-     -f your-test-values.yaml
-   
-   # Test secret access
-   kubectl exec -it deployment/sample-service-python -n test-namespace -- \
-     curl "http://secrets-router:8080/secrets/test-secret/password?namespace=test-namespace"
-   ```
-
-### Best Practices for Testing
-
-- **Use Separate Namespaces**: Create dedicated namespaces for testing to avoid conflicts with production secrets
-- **Validate Each Secret**: Test individual secret keys to ensure data integrity
-- **Error Handling**: Verify your applications handle secret access failures gracefully
-- **Simple Setup**: Use only Kubernetes secrets in the same namespace as your services
-
-That's it! You're ready to use Secrets Router in your applications.
+If you get a 404 error:
+1. Verify the secret exists in the correct namespace
+2. Check that the secret name in your code matches the configuration
+3. Ensure your pod is in the same namespace as the secret
