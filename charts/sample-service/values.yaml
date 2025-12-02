@@ -22,7 +22,7 @@ clients:
         value: "sample-secret"
       - name: TEST_SECRET_KEY
         value: "password"
-      - name: TEST_NAMESPACE
+      - name: NAMESPACE
         value: "dapr-control-plane"
   
   python:
@@ -36,7 +36,7 @@ clients:
         value: "sample-secret"
       - name: TEST_SECRET_KEY
         value: "password"
-      - name: TEST_NAMESPACE
+      - name: NAMESPACE
         value: "dapr-control-plane"
   
   bash:
@@ -50,7 +50,7 @@ clients:
         value: "sample-secret"
       - name: TEST_SECRET_KEY
         value: "password"
-      - name: TEST_NAMESPACE
+      - name: NAMESPACE
         value: "dapr-control-plane"
 
 resources:

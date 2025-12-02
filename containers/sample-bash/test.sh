@@ -6,7 +6,7 @@ set -euo pipefail
 SECRETS_ROUTER_URL="${SECRETS_ROUTER_URL:-http://secrets-router:8080}"
 TEST_SECRET_NAME="${TEST_SECRET_NAME:-database-credentials}"
 TEST_SECRET_KEY="${TEST_SECRET_KEY:-password}"
-TEST_NAMESPACE="${TEST_NAMESPACE:-}"
+TEST_NAMESPACE="${NAMESPACE:-}"
 
 echo "🔍 Testing Secrets Router service with Bash client..."
 echo "Service URL: $SECRETS_ROUTER_URL"

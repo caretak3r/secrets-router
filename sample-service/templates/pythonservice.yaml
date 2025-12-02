@@ -17,7 +17,7 @@ spec:
       env:
         - name: SECRETS_ROUTER_URL
           value: {{ .Values.secretsRouter.url | quote }}
-        - name: TEST_NAMESPACE
+        - name: NAMESPACE
           value: {{ .Values.secretsRouter.namespace | quote }}
       resources:
         {{- toYaml .Values.resources | nindent 8 }}

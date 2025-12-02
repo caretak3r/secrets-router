@@ -191,7 +191,7 @@ import os
 def get_secret(secret_name: str, secret_key: str = "value") -> str:
     """Retrieve secret value via Secrets Router HTTP API."""
     secrets_router_url = os.getenv("SECRETS_ROUTER_URL")
-    namespace = os.getenv("TEST_NAMESPACE")
+    namespace = os.getenv("NAMESPACE")
     
     url = f"{secrets_router_url}/secrets/{secret_name}/{secret_key}"
     response = requests.get(url, params={"namespace": namespace})
@@ -206,7 +206,7 @@ api_key_secret = get_secret("production-api-keys")  # Kubernetes secret
 
 Each service automatically receives these core environment variables:
 - `SECRETS_ROUTER_URL`: URL of the secrets router service  
-- `TEST_NAMESPACE`: Kubernetes namespace where secrets are stored
+- `NAMESPACE`: Kubernetes namespace where secrets are stored
 
 The secret names themselves are configured in the umbrella chart values, allowing services to reference them by logical names while the secrets-router handles the backend resolution.
 ```

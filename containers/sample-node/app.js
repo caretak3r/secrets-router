@@ -3,7 +3,7 @@ const axios = require('axios');
 const SECRETS_ROUTER_URL = process.env.SECRETS_ROUTER_URL || 'http://secrets-router:8080';
 const TEST_SECRET_NAME = process.env.TEST_SECRET_NAME || 'database-credentials';
 const TEST_SECRET_KEY = process.env.TEST_SECRET_KEY || 'password';
-const TEST_NAMESPACE = process.env.TEST_NAMESPACE; // Optional
+const TEST_NAMESPACE = process.env.NAMESPACE; // Optional
 
 async function testSecretsRouter() {
   console.log('🔍 Testing Secrets Router service...');

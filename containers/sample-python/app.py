@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 SECRETS_ROUTER_URL = os.getenv("SECRETS_ROUTER_URL", "http://secrets-router:8080")
 TEST_SECRET_NAME = os.getenv("TEST_SECRET_NAME", "database-credentials")
 TEST_SECRET_KEY = os.getenv("TEST_SECRET_KEY", "password")
-TEST_NAMESPACE = os.getenv("TEST_NAMESPACE")
+TEST_NAMESPACE = os.getenv("NAMESPACE")
 
 
 async def test_secrets_router():
