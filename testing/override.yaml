@@ -5,6 +5,14 @@
 secrets-router:
   image:
     pullPolicy: Never  # Override base "Always"
+  healthChecks:
+    liveness:
+      initialDelaySeconds: 30
+    readiness:
+      initialDelaySeconds: 15
+    startupProbe:
+      initialDelaySeconds: 15
+      failureThreshold: 30
   secretStores:
     # Configuration for AWS Secrets Manager
     aws:
@@ -12,18 +20,24 @@ secrets-router:
       region: "us-east-1"
       multipleKeyValuesPerSecret: false
 
+sample-service:
+  enabled: false
+
 # Sample services configuration - populate actual secret names
 sample-service-python:
+  enabled: false
   secrets:
     rds-credentials: "rds-credentials"  # Override base empty string
     api-keys: "api-keys"
 
 sample-service-node:
+  enabled: false
   secrets:
     rds-credentials: "rds-credentials"
     redis-password: "redis-password"
 
 sample-service-bash:
+  enabled: false
   secrets:
     rds-credentials: "rds-credentials"
     shell-password: "shell-password"

@@ -14,7 +14,7 @@ dependencies:
     repository: "file://../secrets-router"
     condition: secrets-router.enabled
   - name: sample-service
-    version: "1.0.0"
+    version: "1.0.1"
     repository: "file://../sample-service"
     condition: sample-service.enabled
 

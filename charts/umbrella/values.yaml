@@ -18,6 +18,9 @@ dapr:
 secrets-router:
   enabled: true
 
+sample-service:
+  enabled: false
+
 # Sample Service Configuration
 sample-service-python:
   enabled: true
