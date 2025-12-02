@@ -4,9 +4,9 @@ dependencies:
   version: 1.16.0
 - name: secrets-router
   repository: file://../secrets-router
-  version: 1.0.1
+  version: 1.0.2
 - name: sample-service
   repository: file://../sample-service
-  version: 1.0.0
-digest: sha256:3a10319d83e287f300027110589778ee8f7d98a172a7308f970057f009a7ee28
-generated: "2025-11-30T11:34:00.891636-05:00"
+  version: 1.0.1
+digest: sha256:f31da62f0bc831c068864935c7052bfc4031df954464c96cceb34596a21a4d7c
+generated: "2025-12-02T06:36:48.924919-05:00"

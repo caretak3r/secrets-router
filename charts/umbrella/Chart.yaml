@@ -10,7 +10,7 @@ dependencies:
     repository: "https://dapr.github.io/helm-charts/"
     condition: dapr.enabled
   - name: secrets-router
-    version: "1.0.1"
+    version: "1.0.2"
     repository: "file://../secrets-router"
     condition: secrets-router.enabled
   - name: sample-service
