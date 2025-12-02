@@ -5,6 +5,12 @@
 secrets-router:
   image:
     pullPolicy: Never  # Override base "Always"
+  secretStores:
+    # Configuration for AWS Secrets Manager
+    aws:
+      enabled: false
+      region: "us-east-1"
+      multipleKeyValuesPerSecret: false
 
 # Sample services configuration - populate actual secret names
 sample-service-python:

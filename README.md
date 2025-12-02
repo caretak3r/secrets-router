@@ -128,12 +128,18 @@ Customize your deployment by creating an `override.yaml` file:
 secrets-router:
   image:
     pullPolicy: Always  # Production setting
+  secretStores:
+    # Configuration for AWS Secrets Manager (optional)
+    aws:
+      enabled: false  # Set to true to use AWS Secrets Manager instead of Kubernetes secrets
+      region: "us-east-1"  # Your AWS region
+      multipleKeyValuesPerSecret: false  # true if secrets contain multiple key-value pairs
 
 # Configure sample services with their required secrets
 sample-service-python:
   secrets:
-    rds-credentials: "production-db-credentials"    # Kubernetes secret name
-    api-keys: "production-api-keys"                  # Kubernetes secret name
+    rds-credentials: "production-db-credentials"    # Kubernetes secret name (or AWS Secrets Manager name)
+    api-keys: "production-api-keys"                  # Kubernetes secret name (or AWS Secrets Manager name)
 
 sample-service-node:
   secrets:
@@ -144,6 +150,34 @@ sample-service-bash:
   secrets:
     rds-credentials: "production-db-credentials"
     shell-password: "shell-credentials"
+```
+
+**Minimal Override Structure:**
+```yaml
+# For local testing with minimal configuration
+secrets-router:
+  image:
+    pullPolicy: Never  # Use local images
+  secretStores:
+    aws:
+      enabled: false
+      region: "us-east-1"
+      multipleKeyValuesPerSecret: false
+
+sample-service-python:
+  secrets:
+    rds-credentials: "rds-credentials"
+    api-keys: "api-keys"
+
+sample-service-node:
+  secrets:
+    rds-credentials: "rds-credentials"
+    redis-password: "redis-password"
+
+sample-service-bash:
+  secrets:
+    rds-credentials: "rds-credentials"
+    shell-password: "shell-password"
 ```
 
 ## Application Integration
