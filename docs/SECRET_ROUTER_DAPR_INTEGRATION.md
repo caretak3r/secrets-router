@@ -533,8 +533,8 @@ graph TB
     style SDK fill:#ffa500
     style CLOUD_SECRETS fill:#ffa500
     
-    note right of NATIVE_SECRETS "No audit trail\nNo rate limiting\nNo service-specific policies"
-    note right of CLOUD_SECRETS "Potential credential theft\nBroad access scope"
+    note right of NATIVE_SECRETS "No audit trail|No rate limiting|No service-specific policies"
+    note right of CLOUD_SECRETS "Potential credential theft|Broad access scope"
 ```
 
 **2. Loss of Security Benefits**
@@ -659,3 +659,413 @@ While Dapr secrets scopes and the Secrets Router provide strong **application-la
 4. **Comprehensive monitoring** (Audit logs, anomaly detection)
 
 The Secrets Router significantly raises the bar for secure secret access and provides essential auditing and policy enforcement that's missing from vanilla Kubernetes, but it should be part of a comprehensive defense-in-depth strategy rather than the sole security boundary.
+
+## Customer Secret Protection - Deny All Except Specific Applications
+
+### Customer Use Case
+
+When a customer wants to protect their secrets in AWS Secrets Manager while allowing our helm chart to access only specific application secrets, we need a **deny-all-except** IAM policy approach.
+
+### Customer-Specific IAM Policy Template
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Deny",
+      "Action": [
+        "secretsmanager:GetSecretValue",
+        "secretsmanager:DescribeSecret",
+        "secretsmanager:ListSecrets"
+      ],
+      "Resource": [
+        "arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:customer/*",
+        "arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:*-admin-*",
+        "arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:*-root-*",
+        "arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:*-private-*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:GetSecretValue",
+        "secretsmanager:DescribeSecret"
+      ],
+      "Resource": [
+        "arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:prod/secrets-router-backend/*",
+        "arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:prod/application-config/*",
+        "arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:prod/shared/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "${AWS_REGION}",
+          "secretsmanager:ResourceTag/AllowedApplication": "secrets-router"
+        },
+        "ForAllValues:StringEquals": {
+          "secretsmanager:VersionStage": "AWSCURRENT"
+        },
+        "IpAddress": {
+          "aws:SourceIp": [
+            "10.0.0.0/8",
+            "172.16.0.0/12", 
+            "192.168.0.0/16"
+          ]
+        }
+      }
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:GetSecretValue"
+      ],
+      "Resource": [
+        "arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:prod/database-credentials-main"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "${AWS_REGION}",
+          "secretsmanager:ResourceTag/Service": ["backend", "worker"],
+          "secretsmanager:ResourceTag/Environment": "production"
+        },
+        "DateGreaterThan": {
+          "aws:CurrentTime": "2025-01-01T00:00:00Z"
+        },
+        "StringLessThan": {
+          "aws:RequestedRegion": "us-east-1"
+        }
+      }
+    }
+  ]
+}
+```
+
+### Helm Chart Integration
+
+#### Values.yaml Configuration for Customer
+
+```yaml
+# Customer-specific values.yaml
+secretsRouter:
+  # IAM role configuration for customer deployment
+  iam:
+    # Existing IAM role to use (customer provides)
+    existingRoleArn: "arn:aws:iam::${CUSTOMER_ACCOUNT}:role/customer-secrets-router-role"
+    
+    # OR create new role with these policies
+    createRole: true
+    trustedServiceAccount: "secrets-router-sa"
+    
+    # IAM policies to attach
+    policies:
+      denyCustomerSecrets:
+        # Deny access to customer-namespace secrets
+        effect: "Deny"
+        actions: ["secretsmanager:GetSecretValue"]
+        resources: ["arn:aws:secretsmanager:*:${CUSTOMER_ACCOUNT}:secret:customer/*"]
+        resources: ["arn:aws:secretsmanager:*:${CUSTOMER_ACCOUNT}:secret:*-private-*"]
+        
+      allowApplicationSecrets:
+        # Allow only specific application secrets
+        effect: "Allow"
+        actions: ["secretsmanager:GetSecretValue"]
+        resources: [
+          "arn:aws:secretsmanager:*:${CUSTOMER_ACCOUNT}:secret:prod/secrets-router/*",
+          "arn:aws:secretsmanager:*:${CUSTOMER_ACCOUNT}:secret:prod/app-config/*"
+        ]
+        conditions:
+          StringEquals:
+            "secretsmanager:ResourceTag/AllowedApplication": "secrets-router"
+
+# Application configuration
+applications:
+  backend:
+    secretAccess:
+      allowedSecrets:
+        - backend: "aws-secrets-manager"
+          name: "prod/database-credentials-main"
+          tags:
+            Service: "backend"
+            Environment: "production"
+      deniedSecrets:
+        - backend: "aws-secrets-manager"  
+          name: "customer/*"
+          reason: "Customer secret protection"
+```
+
+#### Helm Chart Implementation Template
+
+```yaml
+# templates/iam-policy.yaml
+{{- if .Values.secretsRouter.iam.createRole }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "secrets-router.fullname" . }}-iam-policy
+  labels:
+    {{- include "secrets-router.labels" . | nindent 4 }}
+data:
+  policy.json: |-
+    {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Deny",
+          "Action": [
+            "secretsmanager:GetSecretValue",
+            "secretsmanager:DescribeSecret"
+          ],
+          "Resource": [
+            {{- range $denyPattern := .Values.secretsRouter.iam.deniedPatterns }}
+            "arn:aws:secretsmanager:*:${AWS_ACCOUNT_ID}:secret:{{ $denyPattern }}",
+            {{- end }}
+            "arn:aws:secretsmanager:*:${AWS_ACCOUNT_ID}:secret:customer/*"
+          ]
+        },
+        {
+          "Effect": "Allow", 
+          "Action": [
+            "secretsmanager:GetSecretValue",
+            "secretsmanager:DescribeSecret"
+          ],
+          "Resource": [
+            {{- range $allowedSecret := .Values.secretsRouter.iam.allowedSecrets }}
+            "arn:aws:secretsmanager:*:${AWS_ACCOUNT_ID}:secret:{{ $allowedSecret }}",
+            {{- end }}
+          ],
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestedRegion": "{{ .Values.region }}",
+              "secretsmanager:ResourceTag/AllowedApplication": "secrets-router"
+            }
+          }
+        }
+      ]
+    }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "secrets-router.fullname" . }}-secret-access
+  labels:
+    {{- include "secrets-router.labels" . | nindent 4 }}
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list"]
+  resourceNames:
+  {{- range $allowedSecret := .Values.kubernetesSecrets.allowed }}
+  - {{ $allowedSecret }}
+  {{- end }}
+- apiGroups: [""]  
+  resources: ["secrets"]
+  verbs: []  # Explicit deny for all other secrets
+  resourceNames:
+  {{- range $deniedSecret := .Values.kubernetesSecrets.denied }}
+  - {{ $deniedSecret }}
+  {{- end }}
+{{- end }}
+```
+
+### Customer-Specific SecretAccessPolicy CRDs
+
+```yaml
+# Customer application access policy
+apiVersion: secrets.broker/v1alpha1
+kind: SecretAccessPolicy
+metadata:
+  name: customer-backend-policy
+  namespace: {{ .Release.Namespace }}
+spec:
+  services:
+    matchLabels:
+      app.kubernetes.io/name: backend
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  rules:
+    - action: "allow"
+      secrets:
+        - backend: "aws-secrets-manager"
+          name: "prod/database-credentials-main"
+          tags:
+            Service: "backend"
+            Environment: "production"
+        - backend: "aws-secrets-manager"
+          name: "prod/cache-credentials-redis"
+          tags:
+            Service: "backend"
+            Environment: "production"
+    - action: "deny"
+      secrets:
+        - backend: "aws-secrets-manager"
+          name: "customer/*"
+          reason: "Customer secret protection - no access allowed"
+        - backend: "aws-secrets-manager"
+          name: "*-admin-*"
+          reason: "Admin secrets protection"
+        - backend: "aws-secrets-manager"  
+          name: "*-root-*"
+          reason: "Root secrets protection"
+    - action: "deny"
+      secrets:
+        - backend: "kubernetes"
+          name: "customer-*"
+          reason: "Customer namespace isolation"
+  conditions:
+    - type: "require-approval"
+      value: "false"  # Auto-approved for customer-specific secrets
+    - type: "audit-level" 
+      value: "high"
+    - type: "time-restriction"
+      value: "business-hours-only"
+  description: "Customer backend service with deny-all-except customer secrets"
+  customerSpecific: true
+```
+
+### Deployment Diagram for Customer Protection
+
+```mermaid
+graph TB
+    subgraph "Customer AWS Account"
+        subgraph "Customer Secrets (Protected)"
+            CUST_DB[customer/db-prod-main]
+            CUST_API[customer/api-keys-private]
+            CUST_CERT[customer/certs-ssl-prod]
+            CUST_ADMIN[customer/admin-credentials]
+        end
+        
+        subgraph "Application Secrets (Allowed)"
+            APP_DB[prod/secrets-router/database-credentials-main]
+            APP_CACHE[prod/secrets-router/cache-credentials-redis]
+            APP_CONFIG[prod/application-config/settings]
+        end
+        
+        subgraph "IAM Role with Deny-All-Except"
+            IAM_DENY[Explicit Deny Rules]
+            IAM_ALLOW[Specific Allow Rules]
+            COND[Resource Tag Conditions]
+        end
+    end
+    
+    subgraph "Customer Kubernetes Cluster"
+        subgraph "Helm Chart Deployment"
+            P_BACKEND[Backend Pod]
+            P_FRONTEND[Frontend Pod] 
+            SECRETS_ROUTER[Secrets Router Service]
+        end
+    end
+    
+    %% Access Flow
+    P_BACKEND -->|IRSA Token| IAM_ALLOW
+    P_FRONTEND -->|IRSA Token| IAM_ALLOW
+    SECRETS_ROUTER -->|IRSA Token| IAM_ALLOW
+    
+    IAM_DENY -.->|❌ Blocked| CUST_DB
+    IAM_DENY -.->|❌ Blocked| CUST_API
+    IAM_DENY -.->|❌ Blocked| CUST_CERT
+    IAM_DENY -.->|❌ Blocked| CUST_ADMIN
+    
+    IAM_ALLOW -->|✅ Allowed| APP_DB
+    IAM_ALLOW -->|✅ Allowed| APP_CACHE
+    IAM_ALLOW -->|✅ Allowed| APP_CONFIG
+    
+    COND -->|Verify Tag: AllowedApplication| APP_DB
+    COND -->|Require Service=backend| APP_CACHE
+    COND -->|Require Environment=production| APP_CONFIG
+    
+    style CUST_DB fill:#ff6b6b
+    style CUST_API fill:#ff6b6b
+    style CUST_CERT fill:#ff6b6b
+    style CUST_ADMIN fill:#ff6b6b
+    style APP_DB fill:#4caf50
+    style APP_CACHE fill:#4caf50
+    style APP_CONFIG fill:#4caf50
+    style IAM_DENY fill:#f44336
+    style IAM_ALLOW fill:#4caf50
+    
+    note right of IAM_DENY "Customer secrets explicitly\ndenied by policy"
+    note right of IAM_ALLOW "Only app-specific\nsecrets allowed"
+```
+
+### Customer Implementation Steps
+
+#### 1. Pre-Deployment Setup
+
+```bash
+# Customer creates IAM policy
+aws iam create-policy \
+    --policy-name SecretsRouterCustomerPolicy \
+    --policy-document file://customer-deny-all-except-policy.json
+
+# Customer creates IAM role with required trust relationship
+aws iam create-role \
+    --role-name customer-secrets-router-role \
+    --assume-role-policy-document file://irsa-trust-policy.json
+
+# Attach policy to role
+aws iam attach-role-policy \
+    --role-name customer-secrets-router-role \
+    --policy-arn arn:aws:iam::${CUSTOMER_ACCOUNT}:policy/SecretsRouterCustomerPolicy
+```
+
+#### 2. Secret Tagging Requirements
+
+```bash
+# Customer tags their secrets appropriately
+aws secretsmanager tag-resource \
+    --secret-id "prod/secrets-router/database-credentials-main" \
+    --tags Key=AllowedApplication,Value=secrets-router \
+           Key=Service,Value=backend \
+           Key=Environment,Value=production
+
+# Customer secrets remain untagged or have different tags
+aws secretsmanager tag-resource \
+    --secret-id "customer/db-prod-main" \
+    --tags Key=Owner,Value=customer-team \
+           Key=Environment,Value=production \
+           # ❌ No "AllowedApplication=secrets-router" tag
+```
+
+#### 3. Helm Installation
+
+```bash
+# Customer installs helm chart with their specific configuration
+helm install secrets-router ./charts/secrets-router \
+    --namespace production \
+    --create-namespace \
+    --set-file iamPolicy.iamPolicy=./customer-deny-all-except-policy.json \
+    --set secretsRouter.iam.existingRoleArn=arn:aws:iam::${CUSTOMER_ACCOUNT}:role/customer-secrets-router-role \
+    --set region=us-east-1 \
+    --values customer-values.yaml
+```
+
+### Monitoring and Alerting for Customer Compliance
+
+```yaml
+# CloudWatch Alarm for unauthorized access attempts
+Resources:
+  SecretAccessDeniedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: "SecretsRouter-AccessDenied"
+      MetricName: "AccessDenied"
+      Namespace: "AWS/SecretsManager"
+      Statistic: "Sum"
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: "GreaterThanOrEqualToThreshold"
+      AlarmActions:
+        - arn:aws:sns:${AWS_REGION}:${AWS_ACCOUNT_ID}:SecurityAlerts
+      TreatMissingData: "notBreaching"
+```
+
+### Benefits for Customers
+
+1. **Zero-Knowledge Protection**: We (helmet chart provider) never need to know customer secret names
+2. **Explicit Deny Policy**: Customer secrets are explicitly rejected, not just not-in-allow-list
+3. **Tag-Based Enforcement**: Clean separation using AWS resource tagging
+4. **IAM Integration**: Uses AWS native permissions, no custom IAM policies needed
+5. **Audit Trail**: CloudTrail logs all access attempts (both allowed and denied)
+6. **Granular Control**: Can specify exactly which application secrets are allowed
+
+This approach gives customers complete control over their secret access while allowing our helm chart to function with only the specific secrets it requires.
