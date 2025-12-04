@@ -475,8 +475,8 @@ graph TB
     style SECRET_STORE fill:#ff6b6b
     style ALL_SECRETS fill:#ff6b6b
     
-    note right of K8S_API "Cluster Admin or\nany permission\nwith secrets/* access"
-    note right of ALL_SECRETS "Security boundary\ncompletely bypassed"
+    note right of K8S_API "Cluster Admin or|any permission|with secrets/* access"
+    note right of ALL_SECRETS "Security boundary|completely bypassed"
 ```
 
 **2. Namespace Override Vulnerabilities**
