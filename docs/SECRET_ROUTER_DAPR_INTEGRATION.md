@@ -436,3 +436,226 @@ spec:
 6. **Service-Specific Controls**: Fine-grained control per deployed service
 
 This architecture enables zero-trust secrets management while supporting both our internal secrets and customer-provided secrets without requiring knowledge of every specific secret value.
+
+## Limitations and Security Boundary Considerations
+
+### Current Setup with Secrets Router
+
+While the Secrets Router with Dapr scopes provides strong access controls, it has important limitations:
+
+**1. Cluster-Wide Permission Bypass Risk**
+```mermaid
+graph TB
+    subgraph "Normal Flow (Protected)"
+        APP[Application Pod]
+        DAPR[Dapr Sidecar]
+        ROUTER[Secrets Router]
+        POLICY[Policy Engine]
+        SECRETS[K8s/AWS Secrets]
+        
+        APP -->|Secured Request| DAPR
+        DAPR -->|Scoped Access| ROUTER
+        ROUTER -->|Policy Check| POLICY
+        POLICY -->|Authorized Access| SECRETS
+    end
+    
+    subgraph "Bypass Flow (Risk)"
+        BAD_ACTOR[Compromised Service / Cluster Admin]
+        K8S_API[Kubernetes API Direct Access]
+        SECRET_STORE[Direct Secret Store Access]
+        ALL_SECRETS[All Secrets Accessible]
+        
+        BAD_ACTOR -->|Cluster-Admin Token| K8S_API
+        K8S_API -->|kubectl get secrets| SECRET_STORE
+        SECRET_STORE -->|No Restrictions| ALL_SECRETS
+    end
+    
+    style BAD_ACTOR fill:#ff6b6b
+    style K8S_API fill:#ff6b6b
+    style SECRET_STORE fill:#ff6b6b
+    style ALL_SECRETS fill:#ff6b6b
+    
+    note right of K8S_API "Cluster Admin or\nany permission\nwith secrets/* access"
+    note right of ALL_SECRETS "Security boundary\ncompletely bypassed"
+```
+
+**2. Namespace Override Vulnerabilities**
+- Users with `cluster-admin` or namespace admin privileges can override Dapr configurations
+- ServiceAccount token escalation can bypass service identity verification
+- Pod creation with elevated privileges can access raw secret stores
+
+**3. Dapr Configuration Tampering**
+```yaml
+# Malicious user could modify Dapr config to:
+apiVersion: dapr.io/v1alpha1
+kind: Configuration
+metadata:
+  name: compromised-config
+spec:
+  secrets:
+    scopes:
+      - storeName: kubernetes  # Bypass secrets router entirely
+        defaultAccess: allow    # Direct access to K8s secrets
+        allowedSecrets: ["*"]  # All secrets accessible
+```
+
+### Setup Without Secrets Router
+
+Removing the Secrets Router actually **increases** these security risks:
+
+**1. Direct K8s Secrets Access**
+```mermaid
+graph TB
+    subgraph "No Secrets Router - Direct Access"
+        PODO[Pod with privileged ServiceAccount]
+        K8S_API2[Direct K8s API Access]
+        NATIVE_SECRETS[All K8s Secrets in Namespace]
+        
+        PODO -->|kubectl/Client Libraries| K8S_API2
+        K8S_API2 -.->|No Middleware| NATIVE_SECRETS
+    end
+    
+    subgraph "No Secrets Router - No Dapr"
+        APP2[Application Code]
+        SDK[AWS SDK / Other Clients]
+        CLOUD_CREDS[IAM Role / Cloud Credentials]
+        CLOUD_SECRETS[All Cloud Secrets]
+        
+        APP2 -->|Direct AWS API calls| SDK
+        SDK -->|Pod IRSA tokens| CLOUD_CREDS
+        CLOUD_CREDS -->|Full permissions| CLOUD_SECRETS
+    end
+    
+    style PODO fill:#ff6b6b
+    style K8S_API2 fill:#ff6b6b
+    style NATIVE_SECRETS fill:#ff6b6b
+    style APP2 fill:#ffa500
+    style SDK fill:#ffa500
+    style CLOUD_SECRETS fill:#ffa500
+    
+    note right of NATIVE_SECRETS "No audit trail\nNo rate limiting\nNo service-specific policies"
+    note right of CLOUD_SECRETS "Potential credential theft\nBroad access scope"
+```
+
+**2. Loss of Security Benefits**
+| Security Feature | With Secrets Router | Without Secrets Router |
+|------------------|-------------------|---------------------|
+| Service Identity Enforcement | ✅ Yes | ❌ No |
+| Audit Logging | ✅ Comprehensive | ❌ Minimal/None |
+| Rate Limiting | ✅ Per-service | ❌ None |
+| Policy-Based Access | ✅ Fine-grained | ❌ Namespace/RBAC only |
+| Secret Access Anomaly Detection | ✅ Yes | ❌ No |
+| Multi-Backend Unification | ✅ Yes | ❌ Separate clients required |
+
+### Security Boundary Analysis
+
+**The Fundamental Limitation**
+
+Dapr and Secrets Router provide **application-layer** security boundaries, but they cannot prevent bypass by users with **infrastructure-layer** permissions:
+
+```mermaid
+sequenceDiagram
+    participant App as Application Layer
+    participant Dapr as Dapr Layer  
+    participant Router as Secrets Router Layer
+    participant K8s as Kubernetes Layer
+    participant Infra as Infrastructure Layer
+    
+    App->>Dapr: GET secret (controlled)
+    Dapr->>Router: Policy check (controlled)
+    Router->>K8s: Get secret (authorized)
+    
+    Note over App,Router: ✅ This flow is fully controlled and audited
+    
+    Infra->>K8s: kubectl get secrets --all-namespaces
+    Note over Infra,K8s: ❌ Cluster admin bypasses all layers
+    
+    Infra->>App: kubectl exec -it -- bash
+    App->>App: Access any secret in pod
+    Note over Infra,App: ❌ Pod exec bypasses app layer
+```
+
+### Recommended Security Enhancements
+
+**1. Defense in Depth Approach**
+```mermaid
+graph TB
+    subgraph "Layer 1: Network"
+        NET_POL[Network Policies]
+        PSP[Pod Security Policies]
+    end
+    
+    subgraph "Layer 2: Kubernetes RBAC" 
+        RBAC[Strict RBAC]
+        PSA[Pod Security Admission]
+        AUDIT[K8s Audit Logging]
+    end
+    
+    subgraph "Layer 3: Application (Current)"
+        DAPR_SEC[Dapr Secrets Scopes]
+        ROUTER_SEC[Secrets Router Policies]
+        APP_AUDIT[Application Audit Logs]
+    end
+    
+    subgraph "Layer 4: Cloud Provider"
+        IAM_POL[AWS IAM Policies]
+        CLOUD_AUDIT[CloudTrail Logs]
+        IRSA[Pod Identity Binding]
+    end
+    
+    NET_POL --> RBAC
+    RBAC --> DAPR_SEC
+    DAPR_SEC --> IAM_POL
+    
+    style NET_POL fill:#e3f2fd
+    style RBAC fill:#e8f5e8
+    style DAPR_SEC fill:#fff3e0
+    style IAM_POL fill:#fce4ec
+```
+
+**2. Mitigation Strategies**
+
+| Risk Level | Threat Vector | Mitigation |
+|------------|---------------|------------|
+| **Critical** | Cluster Admin compromise | - Multi-person approval for cluster-admin<br>- Break-glass access procedures<br>- Regular access reviews |
+| **High** | Namespace admin escalation | - Namespace quotas and limits<br>- OPA/Gatekeeper policies<br>- ServiceAccount token restrictions |
+| **Medium** | Pod/ServiceAccount compromise | - Pod Security Standards enforcement<br>- Node isolation<br>- Runtime security monitoring |
+| **Low** | Application-level bypass | - Secrets Router policies<br>- Dapr scopes validation<br>- Application secrets encryption |
+
+**3. Operational Recommendations**
+
+1. **Least Privilege Infrastructure Access**
+   - Use role-based access instead of cluster-admin where possible
+   - Implement just-in-time access requests for elevated permissions
+   - Regular audit of who has cluster-wide permissions
+
+2. **Detect and Alert on Bypass Attempts**
+   ```yaml
+   # Example Falco rule for suspicious secret access
+   - rule: Unauthorized Secret Access
+     condition: >
+       kubectl and
+       (k8s.ns.name != "kube-system") and
+       (k8s.secrets.name != "default-token-*") and
+       user.name != "system:serviceaccount:secrets-router:secrets-router-sa"
+     output: >
+       Unauthorized secret access detected (user=%user.name ns=%k8s.ns.name 
+       secret=%k8s.secrets.name pod=%k8s.pod.name)
+     priority: HIGH
+   ```
+
+3. **Secrets Configuration Validation**
+   - GitOps-based policy management
+   - Automated policy conflict detection  
+   - Compliance scanning for secret access patterns
+
+### Conclusion
+
+While Dapr secrets scopes and the Secrets Router provide strong **application-layer** security controls, they cannot prevent bypass by users with **infrastructure-level** permissions. The most secure approach combines:
+
+1. **Kubernetes-native controls** (RBAC, PSP, Network Policies)
+2. **Application-layer controls** (Dapr scopes, Secrets Router policies)  
+3. **Infrastructure governance** (Access reviews, break-glass procedures)
+4. **Comprehensive monitoring** (Audit logs, anomaly detection)
+
+The Secrets Router significantly raises the bar for secure secret access and provides essential auditing and policy enforcement that's missing from vanilla Kubernetes, but it should be part of a comprehensive defense-in-depth strategy rather than the sole security boundary.
