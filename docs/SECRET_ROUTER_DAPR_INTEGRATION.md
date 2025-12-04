@@ -537,10 +537,9 @@ graph TB
     style APP2 fill:#ffa500
     style SDK fill:#ffa500
     style CLOUD_SECRETS fill:#ffa500
-    
-    note right of NATIVE_SECRETS "No audit trail|No rate limiting|No service-specific policies"
-    note right of CLOUD_SECRETS "Potential credential theft|Broad access scope"
 ```
+
+*Note: Direct access bypasses all security controls, providing no audit trail, rate limiting, or service-specific policies.*
 
 **2. Loss of Security Benefits**
 | Security Feature | With Secrets Router | Without Secrets Router |
@@ -931,20 +930,20 @@ spec:
 ```mermaid
 graph TB
     subgraph "Customer AWS Account"
-        subgraph "Customer Secrets (Protected)"
+        subgraph "Customer Secrets Protected"
             CUST_DB[customer/db-prod-main]
             CUST_API[customer/api-keys-private]
             CUST_CERT[customer/certs-ssl-prod]
             CUST_ADMIN[customer/admin-credentials]
         end
         
-        subgraph "Application Secrets (Allowed)"
+        subgraph "Application Secrets Allowed"
             APP_DB[prod/secrets-router/database-credentials-main]
             APP_CACHE[prod/secrets-router/cache-credentials-redis]
             APP_CONFIG[prod/application-config/settings]
         end
         
-        subgraph "IAM Role with Deny-All-Except"
+        subgraph "IAM Role with Deny All Except"
             IAM_DENY[Explicit Deny Rules]
             IAM_ALLOW[Specific Allow Rules]
             COND[Resource Tag Conditions]
@@ -964,14 +963,14 @@ graph TB
     P_FRONTEND -->|IRSA Token| IAM_ALLOW
     SECRETS_ROUTER -->|IRSA Token| IAM_ALLOW
     
-    IAM_DENY -.->|❌ Blocked| CUST_DB
-    IAM_DENY -.->|❌ Blocked| CUST_API
-    IAM_DENY -.->|❌ Blocked| CUST_CERT
-    IAM_DENY -.->|❌ Blocked| CUST_ADMIN
+    IAM_DENY -.->|Blocked| CUST_DB
+    IAM_DENY -.->|Blocked| CUST_API
+    IAM_DENY -.->|Blocked| CUST_CERT
+    IAM_DENY -.->|Blocked| CUST_ADMIN
     
-    IAM_ALLOW -->|✅ Allowed| APP_DB
-    IAM_ALLOW -->|✅ Allowed| APP_CACHE
-    IAM_ALLOW -->|✅ Allowed| APP_CONFIG
+    IAM_ALLOW -->|Allowed| APP_DB
+    IAM_ALLOW -->|Allowed| APP_CACHE
+    IAM_ALLOW -->|Allowed| APP_CONFIG
     
     COND -->|Verify Tag: AllowedApplication| APP_DB
     COND -->|Require Service=backend| APP_CACHE
@@ -986,10 +985,9 @@ graph TB
     style APP_CONFIG fill:#4caf50
     style IAM_DENY fill:#f44336
     style IAM_ALLOW fill:#4caf50
-    
-    note right of IAM_DENY "Customer secrets explicitly|denied by policy"
-    note right of IAM_ALLOW "Only app-specific|secrets allowed"
 ```
+
+*Note: Customer secrets are explicitly blocked by IAM policy while only app-specific secrets are allowed through resource tag conditions.*
 
 ### Customer Implementation Steps
 
