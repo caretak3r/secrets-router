@@ -90,18 +90,24 @@ graph TB
     IAM_POL -->|Filtered Secret Access| AWS_API
     IAM_POL -.->|No Access to| AWS_CUST
     
-    styling
-    classDef servicePod fill:#e1f5fe,stroke:#01579b,stroke-width:2px
-    classDef daprSidecar fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
-    classDef secretsRouter fill:#e8f5e8,stroke:#1b5e20,stroke-width:3px
-    classDef awsService fill:#fff3e0,stroke:#e65100,stroke-width:2px
-    classDef policy fill:#fce4ec,stroke:#880e4f,stroke-width:2px
-    
-    class FE_POD,BE_POD,WR_POD servicePod
-    class FE_DAPR,BE_DAPR,WR_DAPR,SR_DAPR daprSidecar
-    class SR_POD,SR_POLICY,SR_SA secretsRouter
-    class AWS_RDS,AWS_API,AWS_CERT,AWS_CUST,IAM_ROLE,IAM_POL awsService
-    class SR_POLICY policy
+    style FE_POD fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    style BE_POD fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    style WR_POD fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    style FE_DAPR fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    style BE_DAPR fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    style WR_DAPR fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    style SR_DAPR fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    style SR_POD fill:#e8f5e8,stroke:#1b5e20,stroke-width:3px
+    style SR_POLICY fill:#e8f5e8,stroke:#1b5e20,stroke-width:3px
+    style SR_SA fill:#e8f5e8,stroke:#1b5e20,stroke-width:3px
+    style AWS_RDS fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    style AWS_API fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    style AWS_CERT fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    style AWS_CUST fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    style IAM_ROLE fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    style IAM_POL fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    style K8S_IRSA fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    style SR_POLICY fill:#fce4ec,stroke:#880e4f,stroke-width:2px
 ```
 
 ## Dapr Configuration Examples
@@ -474,10 +480,9 @@ graph TB
     style K8S_API fill:#ff6b6b
     style SECRET_STORE fill:#ff6b6b
     style ALL_SECRETS fill:#ff6b6b
-    
-    note right of K8S_API "Cluster Admin or|any permission|with secrets/* access"
-    note right of ALL_SECRETS "Security boundary|completely bypassed"
 ```
+
+*Note: Cluster Admin or any permission with secrets/* access can completely bypass all security boundaries.*
 
 **2. Namespace Override Vulnerabilities**
 - Users with `cluster-admin` or namespace admin privileges can override Dapr configurations
@@ -982,8 +987,8 @@ graph TB
     style IAM_DENY fill:#f44336
     style IAM_ALLOW fill:#4caf50
     
-    note right of IAM_DENY "Customer secrets explicitly\ndenied by policy"
-    note right of IAM_ALLOW "Only app-specific\nsecrets allowed"
+    note right of IAM_DENY "Customer secrets explicitly|denied by policy"
+    note right of IAM_ALLOW "Only app-specific|secrets allowed"
 ```
 
 ### Customer Implementation Steps
