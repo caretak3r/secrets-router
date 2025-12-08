@@ -1,0 +1,52 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: final-exact-test
+  labels:
+    app: final-exact-test
+spec:
+  containers:
+  - name: test-client
+    image: curlimages/curl:latest
+    command:
+    - /bin/sh
+    - -c
+    - |
+      echo "=== Secrets Router Raw Response ==="
+      echo "This is exactly what secrets-router returns for /secrets/test-secret/test.pem:"
+      echo ""
+      curl -s secrets-router:8080/secrets/test-secret/test.pem
+      echo ""
+      echo ""
+      
+      echo "=== Extracted PEM Content ==="
+      echo "PEM content extracted from JSON value field:"
+      echo ""
+      SECRET_VALUE=$(curl -s secrets-router:8080/secrets/test-secret/test.pem | sed 's/.*"value":"\([^"]*\)".*/\1/' | sed 's/\\n/\n/g')
+      echo "$SECRET_VALUE"
+      echo ""
+      echo ""
+      
+      echo "=== PEM Format Verification ==="
+      if echo "$SECRET_VALUE" | grep -q "-----BEGIN PRIVATE KEY-----"; then
+        echo "✅ Contains BEGIN marker"
+      else
+        echo "❌ Missing BEGIN marker"
+      fi
+      if echo "$SECRET_VALUE" | grep -q "-----END PRIVATE KEY-----"; then
+        echo "✅ Contains END marker"
+      else
+        echo "❌ Missing END marker"
+      fi
+      
+      echo ""
+      echo "=== Line Count and Structure ==="
+      echo "Total lines: $(echo "$SECRET_VALUE" | wc -l)"
+      echo "First line: $(echo "$SECRET_VALUE" | head -1)"
+      echo "Last line: $(echo "$SECRET_VALUE" | tail -1)"
+      
+      sleep 3600
+    env:
+    - name: HOME
+      value: /tmp
+  restartPolicy: Never

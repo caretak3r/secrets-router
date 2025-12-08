@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: exact-comparison-test
+  labels:
+    app: exact-comparison-test
+spec:
+  containers:
+  - name: test-client
+    image: curlimages/curl:latest
+    command:
+    - /bin/sh
+    - -c
+    - |
+      echo "=== Direct Kubernetes Secret (via kubectl) ==="
+      echo "Original PEM content from Kubernetes secret:"
+      kubectl get secret test-secret -o jsonpath='{.data.test\.pem}' | base64 -d
+      echo ""
+      echo ""
+      
+      echo "=== Secrets Router Response ==="
+      echo "Raw JSON response from secrets-router:"
+      curl -s secrets-router:8080/secrets/test-secret/test.pem
+      echo ""
+      echo ""
+      
+      echo "=== Extracted value from secrets-router ==="
+      SECRET_VALUE=$(curl -s secrets-router:8080/secrets/test-secret/test.pem | sed 's/.*"value":"\([^"]*\)".*/\1/' | sed 's/\\n/\n/g')
+      echo "$SECRET_VALUE"
+      echo ""
+      
+      echo "=== Verification: Are they identical? ==="
+      ORIGINAL=$(kubectl get secret test-secret -o jsonpath='{.data.test\.pem}' | base64 -d)
+      if [ "$ORIGINAL" = "$SECRET_VALUE" ]; then
+        echo "✅ SUCCESS: PEM content is IDENTICAL"
+        echo "✅ Certificate/key files will work correctly through secrets-router"
+      else
+        echo "❌ FAILURE: PEM content differs"
+        echo "Original length: $(echo "$ORIGINAL" | wc -c)"
+        echo "Router length: $(echo "$SECRET_VALUE" | wc -c)"
+      fi
+      
+      sleep 3600
+    env:
+    - name: HOME
+      value: /tmp
+  restartPolicy: Never
