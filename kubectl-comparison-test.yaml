@@ -12,24 +12,27 @@ spec:
     - /bin/sh
     - -c
     - |
-      echo "=== Direct Kubernetes Secret ==="
-      echo "Getting secret directly from Kubernetes:"
+      echo "=== Direct Kubernetes Secret (identity namespace) ==="
+      echo "Getting secret directly from identity namespace:"
       echo ""
-      ORIGINAL=$(kubectl get secret identity-token-creation-private-key -o jsonpath='{.data.test\.pem}' | base64 -d)
+      ORIGINAL=$(kubectl get secret identity-token-creation-private-key -n identity -o jsonpath='{.data.test\.pem}' | base64 -d)
       echo "$ORIGINAL"
       echo ""
       echo "=== Secrets Router Response ==="
-      echo "Getting secret via secrets-router:"
+      echo "Getting secret via secrets-router.default.svc.cluster.local:"
       echo ""
-      ROUTER_RESPONSE=$(curl -s secrets-router:8080/secrets/identity-token-creation-private-key/test.pem)
+      ROUTER_RESPONSE=$(curl -s secrets-router.default.svc.cluster.local:8080/secrets/identity-token-creation-private-key/test.pem?namespace=identity)
       echo "$ROUTER_RESPONSE"
       echo ""
-      echo "=== Extracted PEM from secrets-router ==="
+      
+      # Extract just the value field from JSON response and decode newlines
       SECRET_VALUE=$(echo "$ROUTER_RESPONSE" | sed 's/.*"value":"\([^"]*\)".*/\1/' | sed 's/\\n/\n/g')
+      echo "=== Extracted PEM Value ==="
       echo "$SECRET_VALUE"
       echo ""
-      echo "=== Exacting Comparison ==="
-      echo "Comparing byte-by-byte:"
+      
+      echo "=== Comparison ==="
+      echo "Comparing direct kubectl access vs secrets-router response:"
       if [ "$ORIGINAL" = "$SECRET_VALUE" ]; then
         echo "✅ SUCCESS: PEM content is IDENTICAL"
         echo "✅ Content length matches: $(echo "$ORIGINAL" | wc -c) bytes"
@@ -37,8 +40,8 @@ spec:
         echo "✅ First line: $(echo "$ORIGINAL" | head -1)"
         echo "✅ Last line: $(echo "$ORIGINAL" | tail -1)"
         echo ""
-        echo "🎉 CERTIFICATE/KEY FILES WILL WORK CORRECTLY!"
-        echo "🎉 No modification or corruption detected!"
+        echo "🎉 SECRET ROUTER RETURNS UNADULTERATED SECRET DATA!"
+        echo "🎉 Applications receive exact decoded secret value!"
       else
         echo "❌ FAILURE: PEM content differs"
         echo "Original length: $(echo "$ORIGINAL" | wc -c) bytes"
