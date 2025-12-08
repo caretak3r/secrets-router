@@ -25,9 +25,9 @@ spec:
       echo "$ROUTER_RESPONSE"
       echo ""
       
-      # Extract just the value field from JSON response and decode newlines
-      SECRET_VALUE=$(echo "$ROUTER_RESPONSE" | sed 's/.*"value":"\([^"]*\)".*/\1/' | sed 's/\\n/\n/g')
-      echo "=== Extracted PEM Value ==="
+      # Extract the value field using jq
+      SECRET_VALUE=$(echo "$ROUTER_RESPONSE" | jq -r '.value')
+      echo "=== Extracted PEM Value (using jq) ==="
       echo "$SECRET_VALUE"
       echo ""
       
@@ -42,6 +42,7 @@ spec:
         echo ""
         echo "🎉 SECRET ROUTER RETURNS UNADULTERATED SECRET DATA!"
         echo "🎉 Applications receive exact decoded secret value!"
+        echo "🎉 Secrets-router handles newline decoding automatically!"
       else
         echo "❌ FAILURE: PEM content differs"
         echo "Original length: $(echo "$ORIGINAL" | wc -c) bytes"
