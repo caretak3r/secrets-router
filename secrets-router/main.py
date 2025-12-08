@@ -33,6 +33,9 @@ SERVICE_VERSION = os.getenv("SERVICE_VERSION", "v0.0.1")
 
 if DEBUG_MODE:
     logging.getLogger().setLevel(logging.DEBUG)
+    # Enable httpx debug logging
+    httpx_log = logging.getLogger('httpx')
+    httpx_log.setLevel(logging.DEBUG)
 
 # HTTP client for Dapr sidecar
 dapr_client = httpx.AsyncClient(base_url=DAPR_HTTP_ENDPOINT, timeout=30.0)
@@ -103,7 +106,9 @@ class SecretsRouter:
         store_name = "kubernetes"
         try:
             logger.debug(f"Trying {store_name} for {secret_name} in namespace {namespace or 'default'}")
+            namespace_param = f"?metadata.namespace={namespace}" if namespace else ""
             url = f"/v1.0/secrets/{store_name}/{secret_name}{namespace_param}"
+            logger.debug(f"Full URL: {url}")
             
             response = await self.http_client.get(url)
             
@@ -114,17 +119,24 @@ class SecretsRouter:
                     # Kubernetes secrets are base64 encoded, decode them
                     value = secret_data[secret_key]
                     try:
-                        decoded_value = base64.b64decode(value).decode('utf-8')
+                        # Try to decode as UTF-8 first (for text secrets)
+                        raw_bytes = base64.b64decode(value)
+                        decoded_value = raw_bytes.decode('utf-8')
+                        content_type = "text"
                     except (TypeError, ValueError, UnicodeDecodeError):
-                        # If decoding fails, use original value
-                        decoded_value = value
+                        # If UTF-8 decoding fails, this is binary data
+                        # Use hex encoding for binary data to preserve exact bytes
+                        raw_bytes = base64.b64decode(value)
+                        decoded_value = raw_bytes.hex()
+                        content_type = "binary"
                         
-                    logger.info(f"Found secret '{secret_name}' in {store_name}")
+                    logger.info(f"Found secret '{secret_name}' in {store_name} ({content_type})")
                     return {
                         "backend": store_name,
                         "secret_name": secret_name,
                         "secret_key": secret_key,
-                        "value": decoded_value
+                        "value": decoded_value,
+                        "content_type": content_type
                     }
                 else:
                     logger.warning(f"Key '{secret_key}' not in secret '{secret_name}' from {store_name}")
