@@ -15,13 +15,13 @@ spec:
       echo "=== Direct Kubernetes Secret ==="
       echo "Getting secret directly from Kubernetes:"
       echo ""
-      ORIGINAL=$(kubectl get secret test-secret -o jsonpath='{.data.test\.pem}' | base64 -d)
+      ORIGINAL=$(kubectl get secret identity-token-creation-private-key -o jsonpath='{.data.test\.pem}' | base64 -d)
       echo "$ORIGINAL"
       echo ""
       echo "=== Secrets Router Response ==="
       echo "Getting secret via secrets-router:"
       echo ""
-      ROUTER_RESPONSE=$(curl -s secrets-router:8080/secrets/test-secret/test.pem)
+      ROUTER_RESPONSE=$(curl -s secrets-router:8080/secrets/identity-token-creation-private-key/test.pem)
       echo "$ROUTER_RESPONSE"
       echo ""
       echo "=== Extracted PEM from secrets-router ==="
